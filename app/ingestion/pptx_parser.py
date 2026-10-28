@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from pptx import Presentation
 
-from app.models import ParsedSlide, ParsedCase
+from app.models import ParsedSlide, ParsedCase, determine_case_status
 
 SECTION_NAMES = ("BRIEF", "CREATIVE", "IMPACT")
 PLACEHOLDER_RE = re.compile(r"^REPLACE WITH (?:VIDEO|IMAGE)\b", re.I)
@@ -174,24 +174,29 @@ def parse_pptx(path: str | Path) -> list[ParsedSlide]:
 def build_cases(slides: list[ParsedSlide], source_deck: str) -> list[ParsedCase]:
     """First-pass grouping: one case per slide until continuation rules are verified."""
     cases: list[ParsedCase] = []
+
     for slide in slides:
         if not slide.is_case_study:
             continue
-        cases.append(
-            ParsedCase(
-                case_id=f"slide-{slide.slide_number}",
-                title=slide.case_name or f"Untitled case on slide {slide.slide_number}",
-                pillar=slide.pillar,
-                client=None,
-                services=None,
-                brief=slide.brief,
-                creative=slide.creative,
-                impact=slide.impact,
-                source_deck=source_deck,
-                slide_numbers=[slide.slide_number],
-                source_links=slide.hyperlinks,
-                source_link_labels=slide.hyperlink_labels,
-                review_status="needs_review",
-            )
+
+        case = ParsedCase(
+            case_id=f"slide-{slide.slide_number}",
+            title=slide.case_name or f"Untitled case on slide {slide.slide_number}",
+            pillar=slide.pillar,
+            client=None,
+            services=None,
+            brief=slide.brief,
+            creative=slide.creative,
+            impact=slide.impact,
+            source_deck=source_deck,
+            slide_numbers=[slide.slide_number],
+            source_links=slide.hyperlinks,
+            source_link_labels=slide.hyperlink_labels,
         )
+
+        # Determine the status after the case has been created.
+        case.review_status = determine_case_status(case)
+
+        cases.append(case)
+
     return cases

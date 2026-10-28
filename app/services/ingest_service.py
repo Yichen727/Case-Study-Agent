@@ -1,12 +1,20 @@
 from pathlib import Path
 from app.ingestion.pptx_parser import parse_pptx, build_cases
+from app.models import determine_case_status
 from app.db.repository import init_db, save_cases
 from app.services.web_enrichment import fetch_case_page
 
 
-def ingest_deck(pptx_path: str | Path, db_path: str | Path) -> dict:
+
+def ingest_deck(
+    pptx_path: str | Path,
+    db_path: str | Path,
+    source_deck: str | None = None
+) -> dict:
     slides = parse_pptx(pptx_path)
-    cases = build_cases(slides, source_deck=Path(pptx_path).name)
+
+    source_deck = source_deck or Path(pptx_path).name
+    cases = build_cases(slides, source_deck=source_deck)
     # Enrich only from approved Atomized Studios pages; external-page failures are non-fatal.
     for case in cases:
         for url in case.source_links:
@@ -19,6 +27,10 @@ def ingest_deck(pptx_path: str | Path, db_path: str | Path) -> dict:
                 case.services = page["services"]
             if case.linked_page_text and case.client and case.services:
                 break
+            
+        # Recalculate status after webpage enrichment.
+        case.review_status = determine_case_status(case)
+
     init_db(db_path)
     save_cases(
         db_path,

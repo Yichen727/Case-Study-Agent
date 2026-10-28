@@ -24,7 +24,11 @@ with st.sidebar:
             tmp.write(uploaded.getvalue())
             temp_path = Path(tmp.name)
         try:
-            result = ingest_deck(temp_path, DB_PATH)
+            result = ingest_deck(
+                temp_path,
+                DB_PATH,
+                source_deck=uploaded.name
+            )
             st.success(
                 f"Parsed {result['slide_count']} slides; "
                 f"found {result['case_count']} case-study slides."

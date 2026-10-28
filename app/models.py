@@ -32,3 +32,28 @@ class ParsedCase:
     source_link_labels: list[dict[str, str]] = field(default_factory=list)
     linked_page_text: Optional[str] = None
     review_status: str = "needs_review"
+
+
+# Fields that must be present for a case to be considered complete.
+REQUIRED_CASE_FIELDS = (
+    "pillar",
+    "client",
+    "services",
+    "brief",
+    "creative",
+    "impact",
+)
+
+
+def determine_case_status(case: ParsedCase) -> str:
+    """Return confirmed when all required fields contain non-empty values."""
+    for field_name in REQUIRED_CASE_FIELDS:
+        value = getattr(case, field_name, None)
+
+        if value is None:
+            return "needs_review"
+
+        if isinstance(value, str) and not value.strip():
+            return "needs_review"
+
+    return "confirmed"

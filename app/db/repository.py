@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from app.models import ParsedCase
+from app.models import ParsedCase, determine_case_status
 
 
 SCHEMA = """
@@ -69,46 +69,95 @@ def init_db(db_path: str | Path) -> None:
         if "source_link_labels_json" not in columns:
             conn.execute("ALTER TABLE cases ADD COLUMN source_link_labels_json TEXT NOT NULL DEFAULT '[]'")
 
-
 def save_cases(db_path: str | Path, cases: list[ParsedCase], slide_text_by_number: dict[int, str]) -> None:
-    """Upsert parsed cases and their source slide records."""
+    """Upsert parsed cases, recalculate status, and save source slides."""
     with connect(db_path) as conn:
         for case in cases:
+            # Read existing values so previously enriched metadata is preserved.
+            existing = conn.execute(
+                """
+                SELECT client, services, linked_page_text
+                FROM cases
+                WHERE case_id = ?
+                """,
+                (case.case_id,),
+            ).fetchone()
+
+            client = case.client
+            services = case.services
+            linked_page_text = case.linked_page_text
+
+            if existing:
+                client = client or existing["client"]
+                services = services or existing["services"]
+                linked_page_text = linked_page_text or existing["linked_page_text"]
+
+            # Determine status using the final values that will be saved.
+            effective_case = ParsedCase(
+                case_id=case.case_id,
+                title=case.title,
+                pillar=case.pillar,
+                client=client,
+                services=services,
+                brief=case.brief,
+                creative=case.creative,
+                impact=case.impact,
+                source_deck=case.source_deck,
+                slide_numbers=case.slide_numbers,
+                source_links=case.source_links,
+                source_link_labels=case.source_link_labels,
+                linked_page_text=linked_page_text,
+            )
+            status = determine_case_status(effective_case)
+
             conn.execute(
                 """
                 INSERT INTO cases (
                     case_id, title, pillar, client, services, brief, creative, impact,
-                    source_deck, source_links_json, source_link_labels_json, linked_page_text, review_status, updated_at
+                    source_deck, source_links_json, source_link_labels_json,
+                    linked_page_text, review_status, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(case_id) DO UPDATE SET
-                    title=excluded.title,
-                    pillar=excluded.pillar,
-                    brief=excluded.brief,
-                    creative=excluded.creative,
-                    impact=excluded.impact,
-                    source_deck=excluded.source_deck,
-                    source_links_json=excluded.source_links_json,
-                    source_link_labels_json=excluded.source_link_labels_json,
-                    linked_page_text=COALESCE(excluded.linked_page_text, cases.linked_page_text),
-                    client=COALESCE(excluded.client, cases.client),
-                    services=COALESCE(excluded.services, cases.services),
-                    updated_at=CURRENT_TIMESTAMP
+                    title = excluded.title,
+                    pillar = excluded.pillar,
+                    client = excluded.client,
+                    services = excluded.services,
+                    brief = excluded.brief,
+                    creative = excluded.creative,
+                    impact = excluded.impact,
+                    source_deck = excluded.source_deck,
+                    source_links_json = excluded.source_links_json,
+                    source_link_labels_json = excluded.source_link_labels_json,
+                    linked_page_text = excluded.linked_page_text,
+                    review_status = excluded.review_status,
+                    updated_at = CURRENT_TIMESTAMP
                 """,
                 (
-                    case.case_id, case.title, case.pillar, case.client, case.services,
-                    case.brief, case.creative, case.impact, case.source_deck,
-                    json.dumps(case.source_links), json.dumps(case.source_link_labels),
-                    case.linked_page_text, case.review_status,
+                    case.case_id,
+                    case.title,
+                    case.pillar,
+                    client,
+                    services,
+                    case.brief,
+                    case.creative,
+                    case.impact,
+                    case.source_deck,
+                    json.dumps(case.source_links),
+                    json.dumps(case.source_link_labels),
+                    linked_page_text,
+                    status,
                 ),
             )
+
             for slide_number in case.slide_numbers:
                 conn.execute(
                     """
-                    INSERT INTO slides (case_id, slide_number, extracted_text, hyperlinks_json)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO slides (
+                        case_id, slide_number, extracted_text, hyperlinks_json
+                    ) VALUES (?, ?, ?, ?)
                     ON CONFLICT(case_id, slide_number) DO UPDATE SET
-                        extracted_text=excluded.extracted_text,
-                        hyperlinks_json=excluded.hyperlinks_json
+                        extracted_text = excluded.extracted_text,
+                        hyperlinks_json = excluded.hyperlinks_json
                     """,
                     (
                         case.case_id,
@@ -117,6 +166,7 @@ def save_cases(db_path: str | Path, cases: list[ParsedCase], slide_text_by_numbe
                         json.dumps(case.source_links),
                     ),
                 )
+
 
 
 def list_cases(db_path: str | Path) -> list[dict]:
@@ -155,10 +205,55 @@ def update_metadata(
             raise ValueError(f"Unknown case_id: {case_id}")
 
         old_value = row[field_name]
+
+        
+        cleaned_value = new_value.strip() or None
+
         conn.execute(
-            f"UPDATE cases SET {field_name} = ?, updated_at=CURRENT_TIMESTAMP WHERE case_id=?",
-            (new_value.strip() or None, case_id),
+            f"""
+            UPDATE cases
+            SET {field_name} = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE case_id = ?
+            """,
+            (cleaned_value, case_id),
         )
+
+        # Recheck status after the metadata change.
+        updated = conn.execute(
+            """
+            SELECT case_id, title, pillar, client, services,
+                   brief, creative, impact, source_deck
+            FROM cases
+            WHERE case_id = ?
+            """,
+            (case_id,),
+        ).fetchone()
+
+        updated_case = ParsedCase(
+            case_id=updated["case_id"],
+            title=updated["title"],
+            pillar=updated["pillar"],
+            client=updated["client"],
+            services=updated["services"],
+            brief=updated["brief"],
+            creative=updated["creative"],
+            impact=updated["impact"],
+            source_deck=updated["source_deck"],
+            slide_numbers=[],
+        )
+
+        status = determine_case_status(updated_case)
+
+        conn.execute(
+            """
+            UPDATE cases
+            SET review_status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE case_id = ?
+            """,
+            (status, case_id),
+        )
+
+
         conn.execute(
             """
             INSERT INTO metadata_history (

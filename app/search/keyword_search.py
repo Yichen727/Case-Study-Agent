@@ -21,7 +21,7 @@ def search_cases(db_path: str, query: str, limit: int = 10) -> list[dict]:
                    GROUP_CONCAT(s.slide_number, ',') AS slide_numbers
             FROM cases c
             LEFT JOIN slides s ON s.case_id = c.case_id
-            WHERE c.review_status IN ('approved', 'needs_review')
+            WHERE c.review_status IN ('approved', 'confirmed', 'needs_review')
               AND (
                   c.title LIKE ? COLLATE NOCASE OR
                   COALESCE(c.pillar, '') LIKE ? COLLATE NOCASE OR
