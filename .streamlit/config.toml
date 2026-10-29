@@ -1,2 +1,21 @@
 [server]
+address = "127.0.0.1"
 maxUploadSize = 500
+
+
+[theme]
+base = "light"
+primaryColor = "#FF0069"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F7F7F9"
+textColor = "#262626"
+borderColor = "#E5E5E8"
+linkColor = "#FF0069"
+baseRadius = "medium"
+buttonRadius = "medium"
+showWidgetBorder = true
+
+[theme.sidebar]
+primaryColor = "#FF0069"
+backgroundColor = "#F7F7F9"
+secondaryBackgroundColor = "#FFFFFF"

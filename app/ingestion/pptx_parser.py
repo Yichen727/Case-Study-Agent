@@ -3,37 +3,68 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
-from app.models import ParsedSlide, ParsedCase, determine_case_status
+from app.models import FieldProvenance, ParsedSlide, ParsedCase
 
 SECTION_NAMES = ("BRIEF", "CREATIVE", "IMPACT")
 PLACEHOLDER_RE = re.compile(r"^REPLACE WITH (?:VIDEO|IMAGE)\b", re.I)
+CASE_TITLE_RE = re.compile(r"^CASE\s+STUDY\s*:\s*(.+)$", re.I)
 
 
 def _shape_text(shape) -> str:
     """Extract readable text from common PowerPoint shape types."""
     if not getattr(shape, "has_text_frame", False):
         return ""
-    return "\n".join(
-        paragraph.text.strip()
-        for paragraph in shape.text_frame.paragraphs
-        if paragraph.text.strip()
-    ).strip()
+    lines = []
+    for paragraph in shape.text_frame.paragraphs:
+        text = paragraph.text.strip()
+        # Some slides put the heading and body in separate runs of one paragraph.
+        runs = paragraph.runs
+        if runs and runs[0].text.strip().rstrip(":").upper() in SECTION_NAMES:
+            heading = runs[0].text.strip().rstrip(":").upper()
+            body = "".join(run.text for run in runs[1:]).strip()
+            lines.extend([heading, body] if body else [heading])
+        elif text:
+            lines.append(text)
+    return "\n".join(lines).strip()
+
+
+def _walk_shapes(shapes):
+    for shape in shapes:
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            yield from _walk_shapes(shape.shapes)
+        else:
+            yield shape
+
+
+def _link_type(label: str) -> str:
+    label = label.strip().upper()
+    if label.startswith("READ MORE"):
+        return "READ_MORE"
+    if label.startswith("WATCH") and "VIDEO" in label:
+        return "WATCH_VIDEO"
+    return "OTHER"
 
 
 def _extract_hyperlink_records(shape) -> list[dict[str, str]]:
     """Return each hyperlink's visible run text and target URL from the source PPTX."""
     records: list[dict[str, str]] = []
-    if not getattr(shape, "has_text_frame", False):
-        return records
-    for paragraph in shape.text_frame.paragraphs:
-        for run in paragraph.runs:
-            address = run.hyperlink.address
-            label = run.text.strip()
-            if address:
-                record = {"text": label or "Open link", "url": address}
-                if record not in records:
-                    records.append(record)
+    if getattr(shape, "has_text_frame", False):
+        for paragraph in shape.text_frame.paragraphs:
+            label = paragraph.text.strip()
+            for run in paragraph.runs:
+                address = run.hyperlink.address
+                if address:
+                    record = {"text": label or "Open link", "url": address, "link_type": _link_type(label)}
+                    if record not in records:
+                        records.append(record)
+    address = shape.click_action.hyperlink.address
+    if address:
+        label = _shape_text(shape) or "Open link"
+        record = {"text": label, "url": address, "link_type": _link_type(label)}
+        if record not in records:
+            records.append(record)
     return records
 
 
@@ -59,7 +90,7 @@ def _extract_section(lines: list[str], section_name: str) -> str | None:
     next_heading = len(lines)
     for i in range(heading_index + 1, len(lines)):
         upper = lines[i].strip().rstrip(":").upper()
-        if upper in SECTION_NAMES or upper.startswith("READ MORE HERE") or upper.startswith("WATCH VIDEO HERE"):
+        if upper in SECTION_NAMES or _link_type(upper) in {"READ_MORE", "WATCH_VIDEO"}:
             next_heading = i
             break
 
@@ -70,7 +101,20 @@ def _extract_section(lines: list[str], section_name: str) -> str | None:
 
 def _is_case_heading(text: str) -> bool:
     lines = _normalise_lines(text)
-    return bool(lines and re.match(r"^CASE\s+STUDY\b", lines[0], flags=re.I))
+    return bool(lines and re.match(r"^CASE\s+STUDY\b", lines[0], flags=re.I)
+                and not CASE_TITLE_RE.match(lines[0]))
+
+
+def _extract_labelled_field(lines: list[str], name: str) -> str | None:
+    for index, line in enumerate(lines):
+        match = re.fullmatch(rf"{name}\s*:\s*(.+)", line, flags=re.I)
+        if match:
+            return match.group(1).strip() or None
+        if line.rstrip(":").upper() == name and index + 1 < len(lines):
+            value = lines[index + 1]
+            if value.upper().rstrip(":") not in {*SECTION_NAMES, "CLIENT", "SERVICES"}:
+                return value
+    return None
 
 
 def parse_pptx(path: str | Path) -> list[ParsedSlide]:
@@ -87,7 +131,7 @@ def parse_pptx(path: str | Path) -> list[ParsedSlide]:
         shape_records: list[tuple[int, str]] = []
         links: list[str] = []
         link_records: list[dict[str, str]] = []
-        for shape_index, shape in enumerate(slide.shapes):
+        for shape_index, shape in enumerate(_walk_shapes(slide.shapes)):
             text = _shape_text(shape)
             if text:
                 shape_records.append((shape_index, text))
@@ -95,13 +139,11 @@ def parse_pptx(path: str | Path) -> list[ParsedSlide]:
             link_records.extend(shape_links)
             links.extend(item["url"] for item in shape_links)
         links = list(dict.fromkeys(links))
-        # Preserve original order and visible label for every unique URL.
+        # Preserve link labels/types even when the same URL has multiple actions.
         unique_link_records = []
-        seen_urls = set()
         for record in link_records:
-            if record["url"] not in seen_urls:
+            if record not in unique_link_records:
                 unique_link_records.append(record)
-                seen_urls.add(record["url"])
 
         heading_record = next(
             ((idx, text) for idx, text in shape_records if _is_case_heading(text)),
@@ -146,9 +188,10 @@ def parse_pptx(path: str | Path) -> list[ParsedSlide]:
                     continue
                 if PLACEHOLDER_RE.match(value):
                     continue
-                if value.upper().startswith(("READ MORE HERE", "WATCH VIDEO HERE")):
+                if _link_type(value) in {"READ_MORE", "WATCH_VIDEO"}:
                     continue
-                candidates.append(value)
+                title_match = CASE_TITLE_RE.match(value)
+                candidates.append(title_match.group(1).strip() if title_match else value)
             # In this deck the first remaining non-placeholder text shape is the title.
             case_name = candidates[0] if candidates else None
 
@@ -165,26 +208,31 @@ def parse_pptx(path: str | Path) -> list[ParsedSlide]:
                 brief=brief,
                 creative=creative,
                 impact=impact,
+                original_slide_id=slide.slide_id,
+                client=_extract_labelled_field(_normalise_lines(all_text), "CLIENT") if is_case else None,
+                services=_extract_labelled_field(_normalise_lines(all_text), "SERVICES") if is_case else None,
             )
         )
 
     return parsed
 
 
-def build_cases(slides: list[ParsedSlide], source_deck: str) -> list[ParsedCase]:
-    """First-pass grouping: one case per slide until continuation rules are verified."""
+def build_cases(slides: list[ParsedSlide], source_deck: str, source_id: str) -> list[ParsedCase]:
+    """One independent case per original slide, scoped to its import."""
     cases: list[ParsedCase] = []
 
     for slide in slides:
         if not slide.is_case_study:
             continue
+        if not source_id or slide.original_slide_id is None:
+            raise ValueError("A source ID and original slide ID are required.")
 
         case = ParsedCase(
-            case_id=f"slide-{slide.slide_number}",
+            case_id=f"{source_id}:{slide.original_slide_id}",
             title=slide.case_name or f"Untitled case on slide {slide.slide_number}",
             pillar=slide.pillar,
-            client=None,
-            services=None,
+            client=slide.client,
+            services=slide.services,
             brief=slide.brief,
             creative=slide.creative,
             impact=slide.impact,
@@ -192,11 +240,19 @@ def build_cases(slides: list[ParsedSlide], source_deck: str) -> list[ParsedCase]
             slide_numbers=[slide.slide_number],
             source_links=slide.hyperlinks,
             source_link_labels=slide.hyperlink_labels,
+            source_id=source_id,
+            original_slide_id=slide.original_slide_id,
         )
-
-        # Determine the status after the case has been created.
-        case.review_status = determine_case_status(case)
-
+        reference = f"source:{source_id}/slide:{slide.original_slide_id}"
+        for name in ("title", "pillar", "client", "services", "brief", "creative", "impact", "original_slide_id", "slide_number", "source_links"):
+            value = slide.case_name if name == "title" else (
+                slide.hyperlinks if name == "source_links" else getattr(slide, name)
+            )
+            case.field_provenance[name] = FieldProvenance(
+                "SLIDE_EXTRACTED" if value else "UNKNOWN",
+                reference if value else None,
+                "EXTRACTED" if value else "UNVERIFIED",
+            )
         cases.append(case)
 
     return cases

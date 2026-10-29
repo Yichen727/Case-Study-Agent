@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.db.repository import connect
+from app.db.repository import CASE_SELECT, connect
 
 
 def search_cases(db_path: str, query: str, limit: int = 10) -> list[dict]:
@@ -16,12 +16,8 @@ def search_cases(db_path: str, query: str, limit: int = 10) -> list[dict]:
     pattern = f"%{query}%"
     with connect(db_path) as conn:
         rows = conn.execute(
-            """
-            SELECT c.*,
-                   GROUP_CONCAT(s.slide_number, ',') AS slide_numbers
-            FROM cases c
-            LEFT JOIN slides s ON s.case_id = c.case_id
-            WHERE c.review_status IN ('approved', 'confirmed', 'needs_review')
+            CASE_SELECT + """
+            WHERE c.review_status IN ('CONFIRMED', 'NEEDS_REVIEW')
               AND (
                   c.title LIKE ? COLLATE NOCASE OR
                   COALESCE(c.pillar, '') LIKE ? COLLATE NOCASE OR
@@ -35,7 +31,7 @@ def search_cases(db_path: str, query: str, limit: int = 10) -> list[dict]:
             GROUP BY c.case_id
             ORDER BY
               CASE WHEN c.title LIKE ? COLLATE NOCASE THEN 0 ELSE 1 END,
-              c.title COLLATE NOCASE
+              c.title COLLATE NOCASE, c.source_id, s.slide_number
             LIMIT ?
             """,
             (pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, limit),

@@ -1,0 +1,32 @@
+{
+  "schema_before": 3,
+  "schema_after": 3,
+  "migration_performed": false,
+  "old_column_values_unchanged": true,
+  "row_counts": {
+    "sources": 1,
+    "cases": 60,
+    "slides": 60,
+    "field_metadata": 660,
+    "metadata_history": 47,
+    "tasks": 0,
+    "web_cache": 0,
+    "app_state": 1
+  },
+  "integrity_check": "ok",
+  "foreign_key_errors": [],
+  "ai_runs_created": 0,
+  "new_backups": [],
+  "automatic_migration_backup": "case_studies.before-v3-c80a1bd9.sqlite3",
+  "backup_schema": 2,
+  "old_columns_match_pre_upgrade_backup": {
+    "sources": true,
+    "cases": true,
+    "slides": true,
+    "field_metadata": true,
+    "metadata_history": true,
+    "tasks": true,
+    "web_cache": true,
+    "app_state": true
+  }
+}

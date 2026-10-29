@@ -1,0 +1,60 @@
+{
+  "scope": "isolated DB; company PPTX; simulated HTTP; AppTest excludes browser painting/upload",
+  "source": "Atomized Studios Creds Deck 2025.pptx",
+  "source_bytes": 336673828,
+  "first_import": {
+    "elapsed_ms": 1222.257,
+    "case_count": 60,
+    "enrichment": {
+      "cache_hits": 0,
+      "http_requests": 17,
+      "skipped_budget": 0,
+      "unique_urls": 39,
+      "unavailable_pages": 22,
+      "updated_fields": 51
+    }
+  },
+  "idle_search_tab_rerun": {
+    "runs": 5,
+    "p50_ms": 31.993,
+    "p95_ms": 44.987
+  },
+  "idle_search_tab_list_cases_calls": 0,
+  "queue_submit_including_disk_spool_ms": 208.976,
+  "cases_visible_before_web_finishes": 120,
+  "search_while_task_running": {
+    "runs": 20,
+    "p50_ms": 1.713,
+    "p95_ms": 1.999
+  },
+  "rendered_search_results": 10,
+  "ui_rerun_while_task_running": {
+    "runs": 5,
+    "p50_ms": 47.563,
+    "p95_ms": 53.046
+  },
+  "all_cases_page_rows": 25,
+  "all_cases_list_arguments": [
+    25,
+    0
+  ],
+  "second_import": {
+    "source_id": "independent source ID (omitted)",
+    "slide_count": 83,
+    "case_count": 60,
+    "enrichment": {
+      "cache_hits": 17,
+      "http_requests": 0,
+      "skipped_budget": 0,
+      "unique_urls": 39,
+      "unavailable_pages": 22,
+      "updated_fields": 51
+    }
+  },
+  "second_import_actual_http_calls": 0,
+  "stored_sources": 2,
+  "stored_cases": 120,
+  "snapshot_files": 1,
+  "successful_task_input_files": 0,
+  "ui_exceptions": []
+}

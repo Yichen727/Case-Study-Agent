@@ -1,0 +1,278 @@
+{
+  "scope": "offline ingest with unavailable-page stub; isolated DB; no live HTTP/AI",
+  "source": {
+    "filename": "Atomized Studios Creds Deck 2025.pptx",
+    "bytes": 336673828,
+    "sha256": "82eb81f91313aedd7062b104a3dd46731e5643a082b970e13dfb1c591b098043"
+  },
+  "environment": {
+    "platform": "Windows-10-10.0.19045-SP0",
+    "python": "3.12.4",
+    "executable": "C:\\Users\\86153\\anaconda3\\python.exe",
+    "sqlite": "3.45.3",
+    "packages": {
+      "streamlit": "1.59.2",
+      "python-pptx": "1.0.2",
+      "pytest": "9.1.1",
+      "requests": "2.34.2",
+      "beautifulsoup4": "4.12.3"
+    }
+  },
+  "counts": {
+    "slides": 83,
+    "cases": 60,
+    "all_three_sections": 53,
+    "untitled_cases": 0,
+    "cases_missing_client": 60,
+    "cases_missing_services": 60
+  },
+  "identification": {
+    "slide_count_matches": true,
+    "case_slides_match": true,
+    "missing_slides": [],
+    "unexpected_slides": []
+  },
+  "annotation_checks": [
+    {
+      "slide": 19,
+      "expected_title": "STREET OF DREAMS",
+      "actual_title": "STREET OF DREAMS",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    },
+    {
+      "slide": 20,
+      "expected_title": "WEOY",
+      "actual_title": "WEOY",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    },
+    {
+      "slide": 21,
+      "expected_title": "ALL IN",
+      "actual_title": "ALL IN",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    },
+    {
+      "slide": 23,
+      "expected_title": "STREET OF DREAMS",
+      "actual_title": "STREET OF DREAMS",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    },
+    {
+      "slide": 24,
+      "expected_title": "WEOY",
+      "actual_title": "WEOY",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    },
+    {
+      "slide": 25,
+      "expected_title": "ALL IN",
+      "actual_title": "ALL IN",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    },
+    {
+      "slide": 26,
+      "expected_title": "THE BOTTOM LINE",
+      "actual_title": "THE BOTTOM LINE",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    },
+    {
+      "slide": 29,
+      "expected_title": "BUCKINGHAM PALACE",
+      "actual_title": "BUCKINGHAM PALACE",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    },
+    {
+      "slide": 31,
+      "expected_title": "EY: THE IMPACT SERIES",
+      "actual_title": "EY: THE IMPACT SERIES",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    },
+    {
+      "slide": 32,
+      "expected_title": "EY: THE IMPACT SERIES",
+      "actual_title": "EY: THE IMPACT SERIES",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    },
+    {
+      "slide": 33,
+      "expected_title": "EY: SUSTAINABILITY PEOPLE",
+      "actual_title": "EY: SUSTAINABILITY PEOPLE",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    },
+    {
+      "slide": 34,
+      "expected_title": "EY: SUSTAINABILITY PEOPLE",
+      "actual_title": "EY: SUSTAINABILITY PEOPLE",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    },
+    {
+      "slide": 64,
+      "expected_title": "EY: AI MULTI-LANGUAGE FILMS",
+      "actual_title": "EY: AI MULTI-LANGUAGE FILMS",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    },
+    {
+      "slide": 65,
+      "expected_title": "EY: AI MULTI-LANGUAGE FILMS",
+      "actual_title": "EY: AI MULTI-LANGUAGE FILMS",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    },
+    {
+      "slide": 79,
+      "expected_title": "AI AVATARS",
+      "actual_title": "AI AVATARS",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    },
+    {
+      "slide": 80,
+      "expected_title": "BSIL: TOILET TRAINING CONTENT",
+      "actual_title": "BSIL: TOILET TRAINING CONTENT",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    },
+    {
+      "slide": 81,
+      "expected_title": "GLOBAL HOTELS ALLIANCE",
+      "actual_title": "GLOBAL HOTELS ALLIANCE",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    },
+    {
+      "slide": 82,
+      "expected_title": "GLOBAL HOTELS ALLIANCE",
+      "actual_title": "GLOBAL HOTELS ALLIANCE",
+      "title_ok": true,
+      "sections_ok": true,
+      "links_ok": true
+    }
+  ],
+  "queries": [
+    {
+      "text": "THE BOTTOM LINE",
+      "returned_slides": [
+        26
+      ],
+      "required_slides_present": true,
+      "latency": {
+        "runs": 20,
+        "p50_ms": 1.046,
+        "p95_ms": 1.153
+      }
+    },
+    {
+      "text": "EY: THE IMPACT SERIES",
+      "returned_slides": [
+        31,
+        32
+      ],
+      "required_slides_present": true,
+      "latency": {
+        "runs": 20,
+        "p50_ms": 1.159,
+        "p95_ms": 1.461
+      }
+    },
+    {
+      "text": "EY: AI MULTI-LANGUAGE FILMS",
+      "returned_slides": [
+        64,
+        65
+      ],
+      "required_slides_present": true,
+      "latency": {
+        "runs": 20,
+        "p50_ms": 1.101,
+        "p95_ms": 1.253
+      }
+    },
+    {
+      "text": "STREET OF DREAMS",
+      "returned_slides": [
+        19,
+        23
+      ],
+      "required_slides_present": true,
+      "latency": {
+        "runs": 20,
+        "p50_ms": 1.078,
+        "p95_ms": 1.247
+      }
+    },
+    {
+      "text": "ocean conservation campaign",
+      "returned_slides": [],
+      "required_slides_present": false,
+      "latency": {
+        "runs": 20,
+        "p50_ms": 1.036,
+        "p95_ms": 1.19
+      }
+    }
+  ],
+  "list_cases_latency": {
+    "runs": 20,
+    "p50_ms": 1.683,
+    "p95_ms": 1.878
+  },
+  "web": {
+    "fetch_case_page_calls": 51,
+    "unique_urls": 41,
+    "allowed_request_opportunities": 17,
+    "unique_allowed_urls": 17,
+    "actual_http_requests": 0,
+    "note": "All page fetches stubbed unavailable; live latency and successful-page early exits not measured."
+  },
+  "ui": {
+    "scope": "Streamlit AppTest server execution; excludes browser rendering and file upload",
+    "initial_run_ms": 2444.466,
+    "initial_calls": {
+      "list_cases_calls": 1,
+      "init_db_calls": 1
+    },
+    "rerun_latency": {
+      "runs": 5,
+      "p50_ms": 27.661,
+      "p95_ms": 32.066
+    },
+    "list_cases_calls_per_rerun": 1.0,
+    "init_db_calls_per_rerun": 1.0,
+    "exceptions": []
+  },
+  "timings": {
+    "parse_ms": 629.282,
+    "save_ms": 17.959,
+    "offline_ingest_ms": 1245.456
+  }
+}

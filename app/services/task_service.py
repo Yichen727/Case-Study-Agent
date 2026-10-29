@@ -1,0 +1,254 @@
+"""One bounded worker for the local single-user workflow; no Streamlit calls."""
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
+import json
+import logging
+from pathlib import Path
+from threading import BoundedSemaphore, RLock
+from uuid import uuid4
+
+from app.db.repository import connect, init_db
+from app.export.openxml_export import export_slides, SlideReference
+from app.ingestion.errors import IngestionError
+from app.ingestion.validation import MAX_FILE_BYTES
+from app.services.enrichment_service import enrich_source
+from app.services.ingest_service import ingest_deck
+from app.services.ai_enrichment import infer_missing_metadata
+
+
+class TaskQueueFull(RuntimeError):
+    pass
+
+
+class TaskManager:
+    def __init__(self, db_path, capacity=4):
+        self.db_path = Path(db_path).resolve()
+        init_db(self.db_path)
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="case-study")
+        self._capacity = BoundedSemaphore(capacity)
+        self._lock = RLock()
+        self._futures = {}
+        self.closed = False
+        with connect(self.db_path) as conn:
+            conn.execute("UPDATE ai_runs SET status='INTERRUPTED',error_code='INTERRUPTED',finished_at=CURRENT_TIMESTAMP WHERE status='RUNNING'")
+            conn.execute("""UPDATE tasks SET status='INTERRUPTED',stage='Interrupted; retry to continue',
+                            error_code='INTERRUPTED',updated_at=CURRENT_TIMESTAMP
+                            WHERE status IN ('QUEUED','RUNNING')""")
+        # Only successful task input copies are disposable without losing retry.
+        for task in self.list_tasks(None, limit=None):
+            if task["status"] == "SUCCEEDED":
+                self._remove_input(task)
+
+    def _reserve(self):
+        if self.closed:
+            raise RuntimeError("The task runner is stopped. Restart the app.")
+        if not self._capacity.acquire(blocking=False):
+            raise TaskQueueFull("The task queue is full. Wait for an import to finish, then try again.")
+
+    def submit_import(self, upload, filename, owner="local"):
+        self._reserve()
+        task_id = uuid4().hex
+        folder = self.db_path.parent / "incoming"
+        path = folder / f"{task_id}.pptx"
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            reader_context = Path(upload).open("rb") if isinstance(upload, (str, Path)) else nullcontext(upload)
+            with reader_context as reader, path.open("xb") as writer:
+                reader.seek(0)
+                size = 0
+                while chunk := reader.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > MAX_FILE_BYTES:
+                        raise IngestionError("INVALID_FILE")
+                    writer.write(chunk)
+            payload = {"input_path": str(path), "source_id": task_id, "refresh_pages": False}
+            self._create(task_id, "IMPORT", filename, owner, payload)
+        except Exception:
+            path.unlink(missing_ok=True)
+            self._capacity.release()
+            raise
+        return task_id
+
+    def submit_enrichment(self, source_id, filename, owner="local", refresh=True):
+        self._reserve()
+        task_id = uuid4().hex
+        try:
+            self._create(task_id, "ENRICH", filename, owner, {"source_id": source_id, "refresh_pages": refresh})
+        except Exception:
+            self._capacity.release()
+            raise
+        return task_id
+
+    def submit_export(self, slides: list[SlideReference], owner="local"):
+        self._reserve()
+        task_id = uuid4().hex
+        try:
+            self._create(task_id, "EXPORT", "Selected cases", owner,
+                         {"slides": [{"path": str(ref.source_path), "slide_id": ref.original_slide_id} for ref in slides]})
+        except Exception:
+            self._capacity.release()
+            raise
+        return task_id
+
+    def submit_ai_enrichment(self, source_id, filename, owner="local"):
+        self._reserve()
+        task_id = uuid4().hex
+        try:
+            self._create(task_id,"AI_ENRICH",filename,owner,{"source_id":source_id})
+        except Exception:
+            self._capacity.release()
+            raise
+        return task_id
+
+    def _create(self, task_id, kind, filename, owner, payload):
+        with connect(self.db_path) as conn:
+            conn.execute("""INSERT INTO tasks(task_id,owner,kind,filename,payload_json,status,stage)
+                            VALUES (?,?,?,?,?,'QUEUED','Queued')""",
+                         (task_id,owner,kind,filename,json.dumps(payload)))
+        self._enqueue(task_id)
+
+    def _enqueue(self, task_id):
+        with self._lock:
+            future = self._executor.submit(self._run, task_id)
+            self._futures[task_id] = future
+
+            def finished(_):
+                with self._lock:
+                    self._futures.pop(task_id, None)
+                self._capacity.release()
+
+            future.add_done_callback(finished)
+
+    def _update(self, task_id, **values):
+        allowed = {"status", "stage", "completed", "total", "result_json", "error_code"}
+        if not set(values).issubset(allowed):
+            raise ValueError("Unsupported task field")
+        with connect(self.db_path) as conn:
+            conn.execute("UPDATE tasks SET " + ",".join(f"{name}=?" for name in values)
+                         + ",updated_at=CURRENT_TIMESTAMP WHERE task_id=?", (*values.values(),task_id))
+
+    def _run(self, task_id):
+        task = self.get_task(task_id)
+        payload = json.loads(task["payload_json"])
+        self._update(task_id, status="RUNNING", stage="Starting", error_code=None)
+
+        def progress(stage, completed, total):
+            self._update(task_id, stage=stage, completed=completed, total=max(1,total))
+
+        try:
+            if task["kind"] == "IMPORT":
+                result = ingest_deck(payload["input_path"], self.db_path, source_deck=task["filename"],
+                                     source_id=payload["source_id"], progress=progress,
+                                     refresh_pages=payload["refresh_pages"])
+                summary = {key: result[key] for key in ("source_id", "slide_count", "case_count", "enrichment", "ai")}
+            elif task["kind"] == "ENRICH":
+                result = enrich_source(payload["source_id"], self.db_path, progress=progress,
+                                       refresh=payload["refresh_pages"])
+                result.pop("applied")
+                summary = {"source_id": payload["source_id"], "enrichment": result}
+            elif task["kind"] == "AI_ENRICH":
+                summary = {"source_id":payload["source_id"],
+                           "ai":infer_missing_metadata(payload["source_id"],self.db_path,progress=progress)}
+            elif task["kind"] == "EXPORT":
+                progress("Exporting original slides", 0, len(payload["slides"]))
+                refs = [SlideReference(Path(ref["path"]), ref["slide_id"]) for ref in payload["slides"]]
+                output = self.db_path.parent / "exports" / f"{task_id}.pptx"
+                export_slides(refs, output)
+                summary = {"output_path": str(output), "slide_count": len(refs)}
+            else:
+                raise ValueError("Unsupported task kind")
+            self._update(task_id, status="SUCCEEDED", stage="Complete", completed=1, total=1,
+                         result_json=json.dumps(summary), error_code=None)
+            self._remove_input(task)
+        except Exception as exc:
+            code = exc.code if isinstance(exc, IngestionError) else "TASK_FAILED"
+            logging.getLogger(__name__).warning("Background task failed: %s", code)
+            self._update(task_id, status="FAILED", stage="Could not complete this task", error_code=code)
+
+    def get_task(self, task_id, owner=None):
+        with connect(self.db_path) as conn:
+            sql = "SELECT * FROM tasks WHERE task_id=?"
+            args = [task_id]
+            if owner is not None:
+                sql += " AND owner=?"
+                args.append(owner)
+            row = conn.execute(sql, args).fetchone()
+            return dict(row) if row else None
+
+    def list_tasks(self, owner, limit=20):
+        with connect(self.db_path) as conn:
+            sql = "SELECT * FROM tasks"
+            args = []
+            if owner is not None:
+                sql += " WHERE owner=?"
+                args.append(owner)
+            sql += " ORDER BY created_at DESC,rowid DESC"
+            if limit is not None:
+                sql += " LIMIT ?"
+                args.append(limit)
+            return [dict(row) for row in conn.execute(sql,args).fetchall()]
+
+    def retry(self, task_id, owner="local"):
+        task = self.get_task(task_id, owner)
+        if not task or task["status"] not in {"FAILED", "INTERRUPTED"}:
+            return False
+        payload = json.loads(task["payload_json"])
+        if task["kind"] == "IMPORT" and not Path(payload["input_path"]).is_file():
+            return False
+        self._reserve()
+        with connect(self.db_path) as conn:
+            updated = conn.execute("""UPDATE tasks SET status='QUEUED',stage='Queued',error_code=NULL,
+                                     payload_json=?,updated_at=CURRENT_TIMESTAMP WHERE task_id=? AND owner=?
+                                     AND status IN ('FAILED','INTERRUPTED')""",
+                                   (json.dumps({**payload,"refresh_pages":True}),task_id,owner))
+        if not updated.rowcount:
+            self._capacity.release()
+            return False
+        self._enqueue(task_id)
+        return True
+
+    def _remove_input(self, task):
+        payload = json.loads(task["payload_json"])
+        if "input_path" in payload:
+            path = Path(payload["input_path"]).resolve()
+            if path.parent != self.db_path.parent / "incoming":
+                raise ValueError("Task input leaves the managed folder")
+            path.unlink(missing_ok=True)
+
+    def clear_finished(self, owner="local"):
+        removed = 0
+        for task in self.list_tasks(owner, limit=None):
+            if task["status"] not in {"QUEUED", "RUNNING"}:
+                with connect(self.db_path) as conn:
+                    cursor = conn.execute("DELETE FROM tasks WHERE task_id=? AND owner=? AND status NOT IN ('QUEUED','RUNNING')",
+                                          (task["task_id"],owner))
+                if cursor.rowcount:
+                    self._remove_input(task)
+                    removed += 1
+        return removed
+
+    def wait(self, task_id, owner="local", timeout=30):
+        """CLI/tests only: the web UI polls and never waits for a Future."""
+        if self.get_task(task_id,owner) is None:
+            return None
+        with self._lock:
+            future = self._futures.get(task_id)
+        if future:
+            future.result(timeout=timeout)
+        return self.get_task(task_id,owner)
+
+    def shutdown(self):
+        self.closed = True
+        self._executor.shutdown(wait=True, cancel_futures=True)
+
+
+_managers = {}
+_manager_lock = RLock()
+
+
+def get_task_manager(db_path):
+    key = str(Path(db_path).resolve())
+    with _manager_lock:
+        if key not in _managers or _managers[key].closed:
+            _managers[key] = TaskManager(key)
+        return _managers[key]

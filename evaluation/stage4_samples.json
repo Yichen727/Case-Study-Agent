@@ -1,0 +1,8 @@
+[
+  {"title":"ACME STAFF FILM","brief":"Acme commissioned a film about its staff.","creative":"We scripted and filmed interviews.","client":"Acme","services":"Scriptwriting and filming","service_terms":[["script","writing"],["film","video"]]},
+  {"title":"NORTHSTAR PORTRAITS","brief":"Northstar asked us to create staff portraits.","creative":"We photographed the employees on location.","client":"Northstar","services":"Photography","service_terms":[["photo"]]},
+  {"title":"UNNAMED INTERVIEW EDIT","brief":"The commissioning brand was not named.","creative":"We edited existing interview footage into a short film.","client":null,"services":"Video editing","service_terms":[["edit"]]},
+  {"title":"GREENWAY SOCIAL FILMS","brief":"Greenway commissioned a series of short social videos.","creative":"We filmed and edited the videos for social channels.","client":"Greenway","services":"Social video production and editing","service_terms":[["video","film"],["edit"]]},
+  {"title":"PLATFORM MENTION ONLY","brief":"TikTok was mentioned as an example of a platform.","creative":"The commissioning brand and the team's services were not supplied.","client":null,"services":null,"service_terms":[]},
+  {"title":"AMBIGUOUS BRANDS","brief":"A speaker discussed Nike, Adidas and Puma; the commissioning organisation was not identified.","creative":"The production work and services were not described.","client":null,"services":null,"service_terms":[]}
+]

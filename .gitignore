@@ -6,4 +6,9 @@ __pycache__/
 *.db
 *.sqlite
 *.sqlite3
+data/uploads/
+data/backups/
+data/incoming/
+data/exports/
+evaluation/artifacts/
 .DS_Store

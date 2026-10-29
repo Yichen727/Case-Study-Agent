@@ -1,0 +1,25 @@
+{
+  "schema_observed_before_check": 3,
+  "schema_after": 4,
+  "migration_during_check": true,
+  "case_count": 60,
+  "statuses": {
+    "CONFIRMED": 52,
+    "NEEDS_REVIEW": 8
+  },
+  "integrity_check": "ok",
+  "foreign_key_errors": [],
+  "backup": "case_studies.before-v4-434a4093.sqlite3",
+  "preserved_content_and_history": {
+    "sources": true,
+    "cases": true,
+    "slides": true,
+    "field_metadata": true,
+    "metadata_history": true,
+    "case_reviews": true,
+    "ai_cache": true,
+    "ai_runs": true,
+    "tasks": true,
+    "web_cache": true
+  }
+}

@@ -1,0 +1,164 @@
+{
+  "scope": "real OpenAI SDK with simulated HTTP; no external requests",
+  "live_quality_validation": false,
+  "model": "gpt-5.4-mini",
+  "prompt_version": "client-services-v2",
+  "sample_count": 6,
+  "elapsed_ms": 1273.429,
+  "first_run": {
+    "status": "COMPLETED",
+    "model": "gpt-5.4-mini",
+    "request_count": 1,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_hits": 0,
+    "applied_fields": 7,
+    "unknown_fields": 5,
+    "skipped_cases": 0,
+    "error_code": null
+  },
+  "second_import_run": {
+    "status": "COMPLETED",
+    "model": "gpt-5.4-mini",
+    "request_count": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_hits": 6,
+    "applied_fields": 7,
+    "unknown_fields": 5,
+    "skipped_cases": 0,
+    "error_code": null
+  },
+  "simulated_sdk_http_requests": 1,
+  "checks": [
+    {
+      "title": "ACME STAFF FILM",
+      "client": "Acme",
+      "services": "Scriptwriting and filming",
+      "client_ok": true,
+      "services_ok": true,
+      "unverified_ai_fields": "client,services"
+    },
+    {
+      "title": "NORTHSTAR PORTRAITS",
+      "client": "Northstar",
+      "services": "Photography",
+      "client_ok": true,
+      "services_ok": true,
+      "unverified_ai_fields": "client,services"
+    },
+    {
+      "title": "UNNAMED INTERVIEW EDIT",
+      "client": null,
+      "services": "Video editing",
+      "client_ok": true,
+      "services_ok": true,
+      "unverified_ai_fields": "services"
+    },
+    {
+      "title": "GREENWAY SOCIAL FILMS",
+      "client": "Greenway",
+      "services": "Social video production and editing",
+      "client_ok": true,
+      "services_ok": true,
+      "unverified_ai_fields": "client,services"
+    },
+    {
+      "title": "PLATFORM MENTION ONLY",
+      "client": null,
+      "services": null,
+      "client_ok": true,
+      "services_ok": true,
+      "unverified_ai_fields": null
+    },
+    {
+      "title": "AMBIGUOUS BRANDS",
+      "client": null,
+      "services": null,
+      "client_ok": true,
+      "services_ok": true,
+      "unverified_ai_fields": null
+    }
+  ],
+  "field_evidence_checks": [
+    {
+      "field": "client",
+      "proposed_value": "Acme",
+      "quote": "Acme commissioned a film about its staff.",
+      "accepted": true
+    },
+    {
+      "field": "services",
+      "proposed_value": "Scriptwriting and filming",
+      "quote": "We scripted and filmed interviews.",
+      "accepted": true
+    },
+    {
+      "field": "client",
+      "proposed_value": "Northstar",
+      "quote": "Northstar asked us to create staff portraits.",
+      "accepted": true
+    },
+    {
+      "field": "services",
+      "proposed_value": "Photography",
+      "quote": "We photographed the employees on location.",
+      "accepted": true
+    },
+    {
+      "field": "client",
+      "proposed_value": null,
+      "quote": null,
+      "accepted": false
+    },
+    {
+      "field": "services",
+      "proposed_value": "Video editing",
+      "quote": "We edited existing interview footage into a short film.",
+      "accepted": true
+    },
+    {
+      "field": "client",
+      "proposed_value": "Greenway",
+      "quote": "Greenway commissioned a series of short social videos.",
+      "accepted": true
+    },
+    {
+      "field": "services",
+      "proposed_value": "Social video production and editing",
+      "quote": "We filmed and edited the videos for social channels.",
+      "accepted": true
+    },
+    {
+      "field": "client",
+      "proposed_value": null,
+      "quote": null,
+      "accepted": false
+    },
+    {
+      "field": "services",
+      "proposed_value": null,
+      "quote": null,
+      "accepted": false
+    },
+    {
+      "field": "client",
+      "proposed_value": null,
+      "quote": null,
+      "accepted": false
+    },
+    {
+      "field": "services",
+      "proposed_value": null,
+      "quote": null,
+      "accepted": false
+    }
+  ],
+  "client_checks_passed": 6,
+  "services_checks_passed": 6,
+  "original_text_unchanged": true,
+  "source_bytes_unchanged": true,
+  "automatically_confirmed": true,
+  "ai_origin_retained": true,
+  "cost_note": "Use recorded input/output tokens and account billing. Offline usage is synthetic zero; model accuracy remains unmeasured offline."
+}

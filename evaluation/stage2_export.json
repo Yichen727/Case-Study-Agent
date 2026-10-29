@@ -1,0 +1,84 @@
+{
+  "scope": "OOXML package and content checks; PowerPoint rendering is recorded separately",
+  "presentations": [
+    {
+      "name": "company_subset",
+      "output_path": "C:\\Users\\86153\\Desktop\\Atomized Project\\case_study_agent\\evaluation\\artifacts\\stage2\\company_subset.pptx",
+      "bytes": 39382526,
+      "export_seconds": 1.218,
+      "slide_xml_byte_identical": true,
+      "all_internal_relationships_resolve": true,
+      "slide_count": 8,
+      "master_count": 1,
+      "slides": [
+        {
+          "source_path": "C:\\Users\\86153\\Desktop\\Atomized Project\\Atomized Studios Creds Deck 2025.pptx",
+          "source_page": 80,
+          "output_page": 1
+        },
+        {
+          "source_path": "C:\\Users\\86153\\Desktop\\Atomized Project\\Atomized Studios Creds Deck 2025.pptx",
+          "source_page": 19,
+          "output_page": 2
+        },
+        {
+          "source_path": "C:\\Users\\86153\\Desktop\\Atomized Project\\Atomized Studios Creds Deck 2025.pptx",
+          "source_page": 26,
+          "output_page": 3
+        },
+        {
+          "source_path": "C:\\Users\\86153\\Desktop\\Atomized Project\\Atomized Studios Creds Deck 2025.pptx",
+          "source_page": 31,
+          "output_page": 4
+        },
+        {
+          "source_path": "C:\\Users\\86153\\Desktop\\Atomized Project\\Atomized Studios Creds Deck 2025.pptx",
+          "source_page": 32,
+          "output_page": 5
+        },
+        {
+          "source_path": "C:\\Users\\86153\\Desktop\\Atomized Project\\Atomized Studios Creds Deck 2025.pptx",
+          "source_page": 64,
+          "output_page": 6
+        },
+        {
+          "source_path": "C:\\Users\\86153\\Desktop\\Atomized Project\\Atomized Studios Creds Deck 2025.pptx",
+          "source_page": 65,
+          "output_page": 7
+        },
+        {
+          "source_path": "C:\\Users\\86153\\Desktop\\Atomized Project\\Atomized Studios Creds Deck 2025.pptx",
+          "source_page": 79,
+          "output_page": 8
+        }
+      ]
+    },
+    {
+      "name": "mixed_sources",
+      "output_path": "C:\\Users\\86153\\Desktop\\Atomized Project\\case_study_agent\\evaluation\\artifacts\\stage2\\mixed_sources.pptx",
+      "bytes": 55134,
+      "export_seconds": 0.021,
+      "slide_xml_byte_identical": true,
+      "all_internal_relationships_resolve": true,
+      "slide_count": 3,
+      "master_count": 2,
+      "slides": [
+        {
+          "source_path": "C:\\Users\\86153\\Desktop\\Atomized Project\\case_study_agent\\evaluation\\fixtures\\source_b.pptx",
+          "source_page": 1,
+          "output_page": 1
+        },
+        {
+          "source_path": "C:\\Users\\86153\\Desktop\\Atomized Project\\case_study_agent\\evaluation\\fixtures\\source_a.pptx",
+          "source_page": 2,
+          "output_page": 2
+        },
+        {
+          "source_path": "C:\\Users\\86153\\Desktop\\Atomized Project\\case_study_agent\\evaluation\\fixtures\\source_a.pptx",
+          "source_page": 1,
+          "output_page": 3
+        }
+      ]
+    }
+  ]
+}

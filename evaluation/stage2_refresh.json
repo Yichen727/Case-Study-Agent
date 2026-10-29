@@ -1,0 +1,24 @@
+{
+  "applied": true,
+  "planned_field_changes": 43,
+  "changed_cases": 36,
+  "skipped_sources_without_snapshots": 0,
+  "changes_by_field": {
+    "title": 6,
+    "source_link_labels_json": 34,
+    "brief": 1,
+    "creative": 1,
+    "impact": 1
+  },
+  "backup": "data\\backups\\case_studies.before-stage2-5bb805c5.sqlite3",
+  "written_fields": 43,
+  "recorded_at": "2026-10-29T10:25:31.633152+00:00",
+  "cases_before": 60,
+  "cases_after": 60,
+  "human_fields_unchanged": true,
+  "existing_history_unchanged": true,
+  "source_records_unchanged": true,
+  "slide_text_records_unchanged": true,
+  "integrity_check": "ok",
+  "original_company_file_unchanged": true
+}
