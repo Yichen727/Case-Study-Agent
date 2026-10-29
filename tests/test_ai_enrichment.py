@@ -69,7 +69,7 @@ def test_without_key_or_missing_fields_no_api_call(dataset, monkeypatch):
     constructor.assert_not_called()
 
 
-def test_infers_only_two_fields_keeps_outcomes_and_reuses_cache_across_imports(dataset, api):
+def test_infers_only_two_fields_keeps_outcomes_and_reuses_cache_across_imports(dataset, api,deck_variant):
     db,path,imported = dataset
     before = list_cases(db)
     original_bytes = path.read_bytes()
@@ -91,7 +91,10 @@ def test_infers_only_two_fields_keeps_outcomes_and_reuses_cache_across_imports(d
         assert provenance["client"]["evidence_text"] == CLIENT_QUOTE
         assert provenance["client"]["model"] == "gpt-5.4-mini"
     assert path.read_bytes() == original_bytes
-    second = ingest_service.ingest_deck(path,db)
+    repeated = ingest_service.ingest_deck(path,db)
+    assert repeated["reused"] and repeated["ai"]["status"] == "SKIPPED"
+    assert len(list_cases(db)) == 2
+    second = ingest_service.ingest_deck(deck_variant(path),db)
     assert second["ai"]["cache_hits"] == 2 and second["ai"]["request_count"] == 0
     assert client.responses.parse.call_count == 1
     assert second["source_id"] != imported["source_id"] and len(list_cases(db)) == 4
@@ -141,12 +144,12 @@ def test_invalid_or_refused_output_is_not_written(dataset, api, mode):
     assert all(row["client"] is None for row in list_cases(db))
 
 
-def test_api_auth_failure_is_safe_and_does_not_rollback_valid_import(dataset, api):
+def test_api_auth_failure_is_safe_and_does_not_rollback_valid_import(dataset, api,deck_variant):
     db,path,_ = dataset
     client,_ = api
     client.responses.parse.side_effect = AuthenticationError(
         "Bearer SECRET private diagnostic",response=httpx.Response(401,request=httpx.Request("POST","https://api.openai.com/v1/responses")),body=None)
-    result = ingest_service.ingest_deck(path,db)
+    result = ingest_service.ingest_deck(deck_variant(path),db)
     assert result["ai"]["status"] == "FAILED" and result["ai"]["error_code"] == "AI_AUTH_FAILED"
     assert "SECRET" not in json.dumps(result["ai"])
     assert len(list_cases(db)) == 4
@@ -204,15 +207,15 @@ def test_case_limit_batch_size_and_budget_are_bounded(tmp_path, monkeypatch, api
     assert client.responses.parse.call_count == 2
 
 
-def test_model_and_prompt_version_are_part_of_cache_identity(dataset, api, monkeypatch):
+def test_model_and_prompt_version_are_part_of_cache_identity(dataset, api, monkeypatch,deck_variant):
     db,path,imported = dataset
     client,_ = api
     ai.infer_missing_metadata(imported["source_id"],db)
     monkeypatch.setattr(ai,"PROMPT_VERSION","client-services-test-next")
-    second = ingest_service.ingest_deck(path,db)
+    second = ingest_service.ingest_deck(deck_variant(path,"next-prompt.pptx"),db)
     assert second["ai"]["request_count"] == 1
     monkeypatch.setattr(ai,"get_ai_settings",lambda: AISettings("test-key","another-compatible-model"))
-    third = ingest_service.ingest_deck(path,db)
+    third = ingest_service.ingest_deck(deck_variant(path,"next-model.pptx"),db)
     assert third["ai"]["request_count"] == 1 and client.responses.parse.call_count == 3
 
 

@@ -1,0 +1,11 @@
+{
+  "applied": true,
+  "backup": "C:\\Users\\86153\\Desktop\\Atomized Project\\case_study_agent\\data\\backups\\case_studies.before-dedup-6d859c95.sqlite3",
+  "removed_cases": 180,
+  "moved_history": 246,
+  "moved_reviews": 0,
+  "duplicate_imports": 3,
+  "skipped_sources": [],
+  "removable_cases": 180,
+  "remaining_cases": 60
+}

@@ -7,6 +7,7 @@ import sqlite3
 
 from app.db.migrations import initialize_database, METADATA_FIELDS, refresh_case_statuses
 from app.models import FieldProvenance, ParsedCase, SourceRecord, missing_value
+from app.search.documents import sync_documents
 
 
 CASE_SELECT = """
@@ -48,7 +49,8 @@ def save_cases(
     """Commit one source and its independent cases atomically.
 
     Re-saving the same immutable import does not overwrite human metadata.
-    A new import always has a new source ID, including identical filenames.
+    Different presentations have independent source IDs, including identical filenames.
+    The ingestion service reuses an existing local import when file bytes match.
     """
     for case in cases:
         if (
@@ -128,6 +130,7 @@ def save_cases(
                 )
         if changed:
             refresh_case_statuses(conn,[case.case_id for case in cases])
+            sync_documents(conn,[case.case_id for case in cases])
             conn.execute("UPDATE app_state SET data_version=data_version+1 WHERE singleton=1")
 
 
@@ -164,7 +167,7 @@ def get_case(db_path: str | Path, case_id: str) -> dict | None:
 def list_case_options(db_path: str | Path, limit: int = 25, offset: int = 0) -> list[dict]:
     with connect(db_path) as conn:
         return [dict(row) for row in conn.execute(
-            """SELECT c.case_id,c.title,c.source_deck,c.source_id,GROUP_CONCAT(s.slide_number,',') AS slide_numbers
+            """SELECT c.case_id,c.title,c.source_deck,c.source_id,c.review_status,GROUP_CONCAT(s.slide_number,',') AS slide_numbers
                FROM cases c LEFT JOIN slides s ON s.case_id=c.case_id GROUP BY c.case_id
                ORDER BY c.title COLLATE NOCASE,c.source_id LIMIT ? OFFSET ?""", (limit,offset)).fetchall()]
 
@@ -189,7 +192,9 @@ def case_options_by_ids(db_path: str | Path, case_ids: list[str]) -> list[dict]:
     with connect(db_path) as conn:
         placeholders = ",".join("?" for _ in case_ids)
         return [dict(row) for row in conn.execute(
-            f"""SELECT c.case_id,c.title,c.source_deck,c.source_id,GROUP_CONCAT(s.slide_number,',') AS slide_numbers
+            f"""SELECT c.case_id,c.title,c.source_deck,c.source_id,c.review_status,GROUP_CONCAT(s.slide_number,',') AS slide_numbers,
+                       EXISTS(SELECT 1 FROM field_metadata m WHERE m.case_id=c.case_id
+                              AND m.source_kind='AI_INFERRED' AND m.verification_status!='VERIFIED') AS unverified_ai
                 FROM cases c LEFT JOIN slides s ON s.case_id=c.case_id
                 WHERE c.case_id IN ({placeholders}) GROUP BY c.case_id""", case_ids).fetchall()]
 
@@ -275,6 +280,7 @@ def update_case_metadata(
             record_metadata_history(conn,case_id,field_name,row[field_name],cleaned_value,
                                     previous,provenance,updated_by,source)
         refresh_case_statuses(conn,[case_id])
+        sync_documents(conn,[case_id])
         conn.execute("UPDATE app_state SET data_version=data_version+1 WHERE singleton=1")
 
 
@@ -302,6 +308,7 @@ def apply_enrichment(db_path: str | Path, updates: list[tuple[str, str, str, str
                 (case_id,name,value,url))
         if written:
             refresh_case_statuses(conn,[row[0] for row in written])
+            sync_documents(conn,[row[0] for row in written])
             conn.execute("UPDATE app_state SET data_version=data_version+1 WHERE singleton=1")
     return written
 
@@ -362,5 +369,6 @@ def apply_ai_inferences(db_path, updates):
             written += 1
         if written:
             refresh_case_statuses(conn,[update["case_id"] for update in updates])
+            sync_documents(conn,[update["case_id"] for update in updates])
             conn.execute("UPDATE app_state SET data_version=data_version+1 WHERE singleton=1")
     return written

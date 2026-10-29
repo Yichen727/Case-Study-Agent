@@ -16,7 +16,7 @@ FIXTURES = Path(__file__).resolve().parents[1] / "evaluation/fixtures"
 
 
 @pytest.mark.parametrize("parallel", [False, True])
-def test_identical_decks_share_bytes_but_not_source_or_case_identity(tmp_path, monkeypatch, parallel):
+def test_identical_decks_reuse_source_cases_and_snapshot_even_when_queued_together(tmp_path, monkeypatch, parallel,deck_variant):
     monkeypatch.setattr(ingest_service, "fetch_case_page", lambda url, **kwargs: {})
     db = tmp_path / "cases.sqlite3"
 
@@ -28,15 +28,17 @@ def test_identical_decks_share_bytes_but_not_source_or_case_identity(tmp_path, m
             imports = list(pool.map(ingest, range(2)))
     else:
         imports = [ingest(0), ingest(1)]
-    assert len(list_sources(db)) == 2 and len(list_cases(db)) == 4
-    assert imports[0]["source_id"] != imports[1]["source_id"]
+    assert len(list_sources(db)) == 1 and len(list_cases(db)) == 2
+    assert imports[0]["source_id"] == imports[1]["source_id"]
+    assert sum(item["reused"] for item in imports) == 1
     assert len(list((tmp_path / "uploads").glob("*.pptx"))) == 1
     assert unused_snapshots(db) == []
     monkeypatch.setattr(ingest_service, "parse_pptx", lambda path: (_ for _ in ()).throw(ValueError()))
+    assert ingest(2)["reused"]
     with pytest.raises(IngestionError):
-        ingest(2)
+        ingest_service.ingest_deck(deck_variant(FIXTURES / "source_a.pptx"),db)
     assert Path(imports[0]["source"].source_snapshot_reference).is_file()
-    assert len(list_cases(db)) == 4
+    assert len(list_cases(db)) == 2
 
 
 def test_cleanup_checks_backups_and_active_snapshot_leases(tmp_path, monkeypatch):

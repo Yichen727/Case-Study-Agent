@@ -7,6 +7,8 @@ from contextlib import ExitStack
 import hashlib
 import json
 from pathlib import Path
+from shutil import copyfile
+from zipfile import ZipFile
 from tempfile import TemporaryDirectory
 from time import perf_counter
 from unittest.mock import patch
@@ -92,7 +94,11 @@ def evaluate(live=False):
             checks.append({"title":sample["title"],"client":row["client"],"services":row["services"],
                            "client_ok":client_ok,"services_ok":services_ok,
                            "unverified_ai_fields":row["unverified_ai_fields"]})
-        second_source = ingest_deck(path,db)
+        version = path.with_name("same-slides-new-version.pptx")
+        copyfile(path,version)
+        with ZipFile(version,"a") as deck:
+            deck.comment = b"New file version; unchanged slide text for AI cache evaluation."
+        second_source = ingest_deck(version,db)
         second = ai.infer_missing_metadata(second_source["source_id"],db)
         selected = rows[samples[0]["title"]]
         metadata = {row["field_name"]:row for row in get_field_metadata(db,selected["case_id"])}

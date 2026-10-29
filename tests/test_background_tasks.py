@@ -105,13 +105,15 @@ def test_restart_marks_persisted_tasks_interrupted_and_requires_explicit_retry(t
         manager.shutdown()
 
 
-def test_export_uses_the_same_worker(tmp_path):
-    from app.export.openxml_export import SlideReference
+def test_export_uses_the_same_worker(tmp_path,monkeypatch):
     from pptx import Presentation
 
-    manager = TaskManager(tmp_path / "cases.sqlite3")
+    monkeypatch.setattr(ingest_service,"fetch_case_page",lambda *args,**kwargs:{})
+    db = tmp_path / "cases.sqlite3"
+    source = ingest_service.ingest_deck(FIXTURES / "source_b.pptx",db)
+    manager = TaskManager(db)
     try:
-        task_id = manager.submit_export([SlideReference(FIXTURES / "source_b.pptx", 256)])
+        task_id = manager.submit_export([source["cases"][0].case_id])
         task = manager.wait(task_id)
         assert task["status"] == "SUCCEEDED"
         output = Path(json.loads(task["result_json"])["output_path"])

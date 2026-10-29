@@ -61,20 +61,24 @@ def test_snapshot_survives_removal_of_temporary_upload(tmp_path):
     assert len(parse_pptx(result["source"].source_snapshot_reference)) == 2
 
 
-def test_same_import_retry_preserves_manual_metadata_and_new_import_stays_separate(tmp_path):
+def test_same_deck_reupload_reuses_import_and_preserves_manual_metadata(tmp_path,monkeypatch):
     db = tmp_path / "cases.sqlite3"
     first = ingest_service.ingest_deck(FIXTURES / "source_a.pptx", db)
     second = ingest_service.ingest_deck(FIXTURES / "source_b.pptx", db)
     case_id = first["cases"][0].case_id
     update_metadata(db, case_id, "client", "Only source A", "tester", verification_status="confirmed")
     save_cases(db, first["cases"], {s.slide_number: s.text for s in first["slides"]}, source=first["source"])
-    third = ingest_service.ingest_deck(FIXTURES / "source_a.pptx", db)
+    monkeypatch.setattr(ingest_service,"parse_pptx",lambda path:pytest.fail("Repeated deck must not be parsed"))
+    monkeypatch.setattr(ingest_service,"enrich_source",lambda *args,**kwargs:pytest.fail("Repeated deck must not fetch web metadata"))
+    monkeypatch.setattr(ingest_service,"infer_missing_metadata",lambda *args,**kwargs:pytest.fail("Repeated deck must not infer metadata"))
+    third = ingest_service.ingest_deck(FIXTURES / "source_a.pptx", db,source_deck="renamed.pptx")
     rows = {row["case_id"]: row for row in list_cases(db)}
-    assert len(rows) == 5
+    assert len(rows) == 3 and len(list_sources(db)) == 2
+    assert third["reused"] and third["source_id"] == first["source_id"]
+    assert third["case_count"] == 2
     assert rows[case_id]["client"] == "Only source A"
     assert rows[case_id]["review_status"] == "NEEDS_REVIEW"
     assert rows[second["cases"][0].case_id]["client"] is None
-    assert rows[third["cases"][0].case_id]["client"] is None
     provenance = {item["field_name"]: item for item in get_field_metadata(db, case_id)}
     assert provenance["client"]["source_kind"] == "HUMAN_ENTERED"
     assert provenance["client"]["verification_status"] == "VERIFIED"

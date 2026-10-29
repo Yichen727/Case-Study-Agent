@@ -14,6 +14,7 @@ from uuid import uuid4
 from app.db.repository import connect, init_db, list_sources
 from app.ingestion.pptx_parser import parse_pptx
 from app.db.migrations import refresh_case_statuses
+from app.search.documents import sync_documents
 from app.ingestion.validation import validate_pptx
 
 
@@ -90,6 +91,7 @@ def repair_fields(db_path: Path, apply: bool = False) -> dict:
                 (case_id, field, old, new))
         if report["written_fields"]:
             refresh_case_statuses(conn,[change[0] for change in changes])
+            sync_documents(conn,[change[0] for change in changes])
             conn.execute("UPDATE app_state SET data_version=data_version+1 WHERE singleton=1")
     return report
 

@@ -7,13 +7,17 @@ from pathlib import Path
 from threading import BoundedSemaphore, RLock
 from uuid import uuid4
 
-from app.db.repository import connect, init_db
-from app.export.openxml_export import export_slides, SlideReference
+from app.db.repository import connect, init_db, data_version
+from app import config
+from app.search.embedding_service import build_index, index_status
+from app.export.openxml_export import OriginalSlideExportError
+from app.export.slide_export import prepare_export, export_original_slides, CaseExportError
 from app.ingestion.errors import IngestionError
 from app.ingestion.validation import MAX_FILE_BYTES
 from app.services.enrichment_service import enrich_source
 from app.services.ingest_service import ingest_deck
 from app.services.ai_enrichment import infer_missing_metadata
+from app.services.microsoft_source import parse_cloud_link, MicrosoftSource
 
 
 class TaskQueueFull(RuntimeError):
@@ -28,6 +32,8 @@ class TaskManager:
         self._capacity = BoundedSemaphore(capacity)
         self._lock = RLock()
         self._futures = {}
+        self._index_failure = None
+        self._cloud_credentials = {}
         self.closed = False
         with connect(self.db_path) as conn:
             conn.execute("UPDATE ai_runs SET status='INTERRUPTED',error_code='INTERRUPTED',finished_at=CURRENT_TIMESTAMP WHERE status='RUNNING'")
@@ -79,16 +85,78 @@ class TaskManager:
             raise
         return task_id
 
-    def submit_export(self, slides: list[SlideReference], owner="local"):
+    def submit_cloud_import(self, url, auth):
+        settings = config.get_microsoft_settings()
+        link = parse_cloud_link(url,settings)
+        if auth is None:
+            raise IngestionError("AUTH_REQUIRED")
+        auth.check_active()
         self._reserve()
         task_id = uuid4().hex
+        payload = {"source_url":link.original_url,"source_id":task_id,"source_type":link.source_type,
+                   "input_path":str(self.db_path.parent / "incoming" / f"{task_id}.pptx"),"refresh_pages":False}
         try:
-            self._create(task_id, "EXPORT", "Selected cases", owner,
-                         {"slides": [{"path": str(ref.source_path), "slide_id": ref.original_slide_id} for ref in slides]})
+            self._cloud_credentials[task_id] = auth
+            self._create(task_id,"CLOUD_IMPORT",link.filename,auth.owner,payload)
         except Exception:
+            self._cloud_credentials.pop(task_id,None)
             self._capacity.release()
             raise
         return task_id
+
+    def _cloud_import(self, task, payload, progress):
+        auth = self._cloud_credentials.get(task["task_id"])
+        if auth is None or auth.owner!=task["owner"]:
+            raise IngestionError("AUTH_REQUIRED")
+        settings = config.get_microsoft_settings()
+        link = parse_cloud_link(payload["source_url"],settings)
+        client = MicrosoftSource(auth,settings)
+        try:
+            progress("Checking Microsoft file access",0,1)
+            item = client.resolve(link)
+            with connect(self.db_path) as conn:
+                previous = conn.execute("SELECT * FROM sources WHERE source_id=?",(payload["source_id"],)).fetchone()
+            if previous:
+                # A retry after commit continues enrichment on the original snapshot.
+                if previous["source_file_id"]!=item["source_file_id"]:
+                    raise IngestionError("FILE_NOT_FOUND")
+                enrichment = enrich_source(previous["source_id"],self.db_path,progress=progress,refresh=True)
+                enrichment.pop("applied")
+                ai = infer_missing_metadata(previous["source_id"],self.db_path,progress=progress)
+                with connect(self.db_path) as conn:
+                    count = conn.execute("SELECT COUNT(*) FROM cases WHERE source_id=?",(previous["source_id"],)).fetchone()[0]
+                return {"source_id":previous["source_id"],"slide_count":None,"case_count":count,
+                        "enrichment":enrichment,"ai":ai,"reused":True}
+            client.download(item,payload["input_path"],progress)
+            result = ingest_deck(payload["input_path"],self.db_path,source_deck=item["filename"],
+                                 source_id=payload["source_id"],source_type=item["source_type"],
+                                 original_source_url=item["original_source_url"],source_file_id=item["source_file_id"],
+                                 source_version=item["version"],progress=progress,refresh_pages=payload["refresh_pages"])
+            return {key:result[key] for key in ("source_id","slide_count","case_count","enrichment","ai","reused")}
+        finally:
+            client.close()
+
+    def submit_export(self, case_ids, owner="local"):
+        plan = prepare_export(self.db_path,tuple(case_ids))
+        with self._lock:
+            with connect(self.db_path) as conn:
+                candidates = conn.execute("""SELECT * FROM tasks WHERE owner=? AND kind='EXPORT' AND cache_key=?
+                                             AND status IN ('QUEUED','RUNNING','SUCCEEDED')
+                                             ORDER BY created_at DESC,rowid DESC""",(owner,plan["cache_key"])).fetchall()
+            for task in candidates:
+                if task["status"] in {"QUEUED","RUNNING"}:
+                    return task["task_id"]
+                output = self.db_path.parent / "exports" / f"{plan['cache_key']}.pptx"
+                if output.is_file() and output.stat().st_size:
+                    return task["task_id"]
+            self._reserve()
+            task_id = uuid4().hex
+            try:
+                self._create(task_id,"EXPORT","Selected cases",owner,plan,cache_key=plan["cache_key"])
+            except Exception:
+                self._capacity.release()
+                raise
+            return task_id
 
     def submit_ai_enrichment(self, source_id, filename, owner="local"):
         self._reserve()
@@ -100,11 +168,42 @@ class TaskManager:
             raise
         return task_id
 
-    def _create(self, task_id, kind, filename, owner, payload):
+    def ensure_indexing(self, owner="local", *, force=False):
+        settings = config.get_ai_settings()
+        if not settings.api_key or not index_status(self.db_path)["pending"]:
+            return None
+        version = (settings.embedding_model,data_version(self.db_path))
+        if not force and self._index_failure == version:
+            return None
+        with self._lock:
+            with connect(self.db_path) as conn:
+                if conn.execute("SELECT 1 FROM tasks WHERE kind='INDEX' AND status IN ('QUEUED','RUNNING')").fetchone():
+                    return None
+            try:
+                self._reserve()
+            except TaskQueueFull:
+                return None
+            task_id = uuid4().hex
+            try:
+                self._create(task_id,"INDEX","Search index",owner,{})
+            except Exception:
+                self._capacity.release()
+                raise
+        return task_id
+
+    def _build_index(self, source_id=None, progress=None):
+        result = build_index(self.db_path,source_id,progress=progress)
+        if result["status"] in {"FAILED","PARTIAL"}:
+            self._index_failure = (result["model"],data_version(self.db_path))
+        else:
+            self._index_failure = None
+        return result
+
+    def _create(self, task_id, kind, filename, owner, payload, cache_key=None):
         with connect(self.db_path) as conn:
-            conn.execute("""INSERT INTO tasks(task_id,owner,kind,filename,payload_json,status,stage)
-                            VALUES (?,?,?,?,?,'QUEUED','Queued')""",
-                         (task_id,owner,kind,filename,json.dumps(payload)))
+            conn.execute("""INSERT INTO tasks(task_id,owner,kind,filename,payload_json,cache_key,status,stage)
+                            VALUES (?,?,?,?,?,?,'QUEUED','Queued')""",
+                         (task_id,owner,kind,filename,json.dumps(payload),cache_key))
         self._enqueue(task_id)
 
     def _enqueue(self, task_id):
@@ -140,30 +239,38 @@ class TaskManager:
                 result = ingest_deck(payload["input_path"], self.db_path, source_deck=task["filename"],
                                      source_id=payload["source_id"], progress=progress,
                                      refresh_pages=payload["refresh_pages"])
-                summary = {key: result[key] for key in ("source_id", "slide_count", "case_count", "enrichment", "ai")}
+                summary = {key: result[key] for key in ("source_id", "slide_count", "case_count", "enrichment", "ai", "reused")}
+                summary["index"] = self._build_index(result["source_id"],progress)
+            elif task["kind"] == "CLOUD_IMPORT":
+                summary = self._cloud_import(task,payload,progress)
+                summary["index"] = self._build_index(summary["source_id"],progress)
             elif task["kind"] == "ENRICH":
                 result = enrich_source(payload["source_id"], self.db_path, progress=progress,
                                        refresh=payload["refresh_pages"])
                 result.pop("applied")
                 summary = {"source_id": payload["source_id"], "enrichment": result}
+                summary["index"] = self._build_index(payload["source_id"],progress)
             elif task["kind"] == "AI_ENRICH":
                 summary = {"source_id":payload["source_id"],
                            "ai":infer_missing_metadata(payload["source_id"],self.db_path,progress=progress)}
+                summary["index"] = self._build_index(payload["source_id"],progress)
+            elif task["kind"] == "INDEX":
+                summary = {"index":self._build_index(progress=progress)}
             elif task["kind"] == "EXPORT":
-                progress("Exporting original slides", 0, len(payload["slides"]))
-                refs = [SlideReference(Path(ref["path"]), ref["slide_id"]) for ref in payload["slides"]]
-                output = self.db_path.parent / "exports" / f"{task_id}.pptx"
-                export_slides(refs, output)
-                summary = {"output_path": str(output), "slide_count": len(refs)}
+                output = self.db_path.parent / "exports" / f"{payload['cache_key']}.pptx"
+                export_original_slides(payload,output,progress=progress)
+                summary = {"output_path":str(output),"slide_count":len(payload["slides"]),"cache_key":payload["cache_key"]}
             else:
                 raise ValueError("Unsupported task kind")
             self._update(task_id, status="SUCCEEDED", stage="Complete", completed=1, total=1,
                          result_json=json.dumps(summary), error_code=None)
             self._remove_input(task)
         except Exception as exc:
-            code = exc.code if isinstance(exc, IngestionError) else "TASK_FAILED"
+            code = exc.code if isinstance(exc,(IngestionError,CaseExportError,OriginalSlideExportError)) else "TASK_FAILED"
             logging.getLogger(__name__).warning("Background task failed: %s", code)
             self._update(task_id, status="FAILED", stage="Could not complete this task", error_code=code)
+        finally:
+            self._cloud_credentials.pop(task_id,None)
 
     def get_task(self, task_id, owner=None):
         with connect(self.db_path) as conn:
@@ -188,13 +295,17 @@ class TaskManager:
                 args.append(limit)
             return [dict(row) for row in conn.execute(sql,args).fetchall()]
 
-    def retry(self, task_id, owner="local"):
+    def retry(self, task_id, owner="local", cloud_auth=None):
         task = self.get_task(task_id, owner)
         if not task or task["status"] not in {"FAILED", "INTERRUPTED"}:
             return False
         payload = json.loads(task["payload_json"])
         if task["kind"] == "IMPORT" and not Path(payload["input_path"]).is_file():
             return False
+        if task["kind"]=="CLOUD_IMPORT":
+            if cloud_auth is None or cloud_auth.owner!=owner:
+                raise IngestionError("AUTH_REQUIRED")
+            cloud_auth.check_active()
         self._reserve()
         with connect(self.db_path) as conn:
             updated = conn.execute("""UPDATE tasks SET status='QUEUED',stage='Queued',error_code=NULL,
@@ -204,6 +315,8 @@ class TaskManager:
         if not updated.rowcount:
             self._capacity.release()
             return False
+        if task["kind"]=="CLOUD_IMPORT":
+            self._cloud_credentials[task_id] = cloud_auth
         self._enqueue(task_id)
         return True
 
@@ -216,16 +329,32 @@ class TaskManager:
             path.unlink(missing_ok=True)
 
     def clear_finished(self, owner="local"):
-        removed = 0
-        for task in self.list_tasks(owner, limit=None):
-            if task["status"] not in {"QUEUED", "RUNNING"}:
-                with connect(self.db_path) as conn:
-                    cursor = conn.execute("DELETE FROM tasks WHERE task_id=? AND owner=? AND status NOT IN ('QUEUED','RUNNING')",
-                                          (task["task_id"],owner))
-                if cursor.rowcount:
-                    self._remove_input(task)
-                    removed += 1
-        return removed
+        with self._lock:
+            removed = 0
+            for task in self.list_tasks(owner, limit=None):
+                if task["status"] not in {"QUEUED", "RUNNING"}:
+                    with connect(self.db_path) as conn:
+                        cursor = conn.execute("DELETE FROM tasks WHERE task_id=? AND owner=? AND status NOT IN ('QUEUED','RUNNING')",
+                                              (task["task_id"],owner))
+                    if cursor.rowcount:
+                        self._remove_input(task)
+                        self._remove_export(task)
+                        removed += 1
+            return removed
+
+    def _remove_export(self, task):
+        if task["kind"]!="EXPORT":
+            return
+        with connect(self.db_path) as conn:
+            if task["cache_key"] and conn.execute("SELECT 1 FROM tasks WHERE kind='EXPORT' AND cache_key=? LIMIT 1",
+                                                  (task["cache_key"],)).fetchone():
+                return
+        result = json.loads(task["result_json"] or "{}")
+        if result.get("output_path"):
+            output = Path(result["output_path"]).resolve()
+            if output.parent!=self.db_path.parent / "exports":
+                raise ValueError("Task output leaves the managed folder")
+            output.unlink(missing_ok=True)
 
     def wait(self, task_id, owner="local", timeout=30):
         """CLI/tests only: the web UI polls and never waits for a Future."""

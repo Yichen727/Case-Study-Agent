@@ -1,0 +1,38 @@
+{
+  "applied": true,
+  "backup": "C:\\Users\\86153\\Desktop\\Atomized Project\\case_study_agent\\data\\backups\\dedup-validation-0175bb44.before-dedup-28508bb7.sqlite3",
+  "removed_cases": 180,
+  "moved_history": 246,
+  "moved_reviews": 0,
+  "duplicate_imports": 3,
+  "skipped_sources": [],
+  "removable_cases": 180,
+  "remaining_cases": 60,
+  "before": {
+    "cases": 240,
+    "metadata_history": 328,
+    "ai_runs": 4,
+    "sources": 4
+  },
+  "after": {
+    "cases": 60,
+    "metadata_history": 328,
+    "ai_runs": 4,
+    "sources": 4,
+    "cases_fts": 60,
+    "search_documents": 60
+  },
+  "integrity": "ok",
+  "foreign_key_errors": 0,
+  "reupload": {
+    "reused": true,
+    "case_count": 60,
+    "source_id": "837563bfe0eb42d2a8babb4837b6acdd"
+  },
+  "index": {
+    "total": 60,
+    "ready": 60,
+    "pending": 0,
+    "model": "text-embedding-3-small"
+  }
+}

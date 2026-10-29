@@ -1,4 +1,4 @@
-"""Shared snapshot bytes with independent source identities."""
+"""Immutable PPTX snapshots, source duplicate lookup, and reference protection."""
 from contextlib import closing
 from datetime import datetime, timezone
 import hashlib
@@ -7,12 +7,29 @@ import sqlite3
 from threading import RLock
 from uuid import uuid4
 
+from app.db.repository import connect
 from app.models import SourceRecord
 from app.ingestion.errors import IngestionError
 from app.ingestion.validation import MAX_FILE_BYTES
 
 _snapshot_lock = RLock()
 _leases: dict[str, int] = {}
+
+
+def find_existing_import(db_path, source):
+    """Reuse local bytes, or the same cloud file/version; keep different files separate."""
+    with connect(db_path) as conn:
+        sql = """SELECT src.*,
+                              (SELECT COUNT(*) FROM cases c WHERE c.source_id=src.source_id) AS case_count
+                              FROM sources src WHERE source_type=? AND content_sha256=?
+                              AND ingestion_status='PARSED' AND requires_reimport=0
+                              AND source_snapshot_reference=?"""
+        args = [source.source_type,source.content_sha256,source.source_snapshot_reference]
+        if source.source_type!="LOCAL":
+            sql += " AND source_file_id=? AND source_version IS ?"
+            args += [source.source_file_id,source.source_version]
+        row = conn.execute(sql+" ORDER BY imported_at,source_id LIMIT 1",args).fetchone()
+        return dict(row) if row else None
 
 
 def _references(db_path: Path) -> set[str] | None:

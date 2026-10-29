@@ -189,3 +189,48 @@ def test_version_three_recalculates_status_and_preserves_metadata_and_old_approv
     assert data_version(db) == old_version + 1
     assert not init_db(db)
     assert len(list((tmp_path / "backups").glob("*.sqlite3"))) == 1
+
+
+def test_version_four_adds_search_index_without_changing_cases_or_metadata(tmp_path,monkeypatch):
+    db = tmp_path / "cases.sqlite3"
+    monkeypatch.setattr(ingest_service,"fetch_case_page",lambda url,**kwargs:{})
+    fixture = Path(__file__).resolve().parents[1] / "evaluation/fixtures/source_a.pptx"
+    imported = ingest_service.ingest_deck(fixture,db)
+    names = ("sources","cases","slides","field_metadata","metadata_history","case_reviews")
+    with connect(db) as conn:
+        before = {name:[tuple(row) for row in conn.execute(f"SELECT * FROM {name} ORDER BY rowid")] for name in names}
+        for name in ("cases_fts","search_documents","embedding_cache","query_intent_cache","search_usage"):
+            conn.execute(f"DROP TABLE {name}")
+        conn.execute("PRAGMA user_version=4")
+    assert init_db(db)
+    with connect(db) as conn:
+        assert before == {name:[tuple(row) for row in conn.execute(f"SELECT * FROM {name} ORDER BY rowid")] for name in names}
+        assert conn.execute("SELECT COUNT(*) FROM search_documents").fetchone()[0] == 2
+        assert conn.execute("SELECT COUNT(*) FROM search_usage").fetchone()[0] == 0
+        rows = conn.execute("SELECT case_id FROM cases_fts WHERE cases_fts MATCH 'continuation'").fetchall()
+        assert [row[0] for row in rows] == [imported["cases"][1].case_id]
+    assert not init_db(db)
+
+
+def test_version_five_preserves_tasks_and_metadata_while_adding_export_cache(tmp_path,monkeypatch):
+    db = tmp_path / "cases.sqlite3"
+    monkeypatch.setattr(ingest_service,"fetch_case_page",lambda *args,**kwargs:{})
+    fixture = Path(__file__).resolve().parents[1] / "evaluation/fixtures/source_b.pptx"
+    ingest_service.ingest_deck(fixture,db)
+    with connect(db) as conn:
+        conn.execute("INSERT INTO tasks(task_id,owner,kind,filename,payload_json,status,stage) VALUES ('old','local','IMPORT','source.pptx','{}','SUCCEEDED','Complete')")
+        conn.execute("DROP INDEX tasks_export_cache")
+        conn.execute("ALTER TABLE tasks DROP COLUMN cache_key")
+        conn.execute("PRAGMA user_version=5")
+        names = ("cases","sources","slides","field_metadata","metadata_history","tasks")
+        before = {name:[tuple(row) for row in conn.execute(f"SELECT * FROM {name} ORDER BY rowid")] for name in names}
+    assert init_db(db)
+    with connect(db) as conn:
+        for name in names:
+            rows = [tuple(row) for row in conn.execute(f"SELECT * FROM {name} ORDER BY rowid")]
+            if name=="tasks":
+                assert [row[:-1] for row in rows]==before[name] and all(row[-1] is None for row in rows)
+            else:
+                assert rows==before[name]
+        assert conn.execute("SELECT name FROM sqlite_master WHERE name='tasks_export_cache'").fetchone()
+    assert not init_db(db)

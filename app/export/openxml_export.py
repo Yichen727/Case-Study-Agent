@@ -1,8 +1,4 @@
-"""Phase-2 original-slide export proof of concept.
-
-Copies original OOXML parts and their relationships, never recreates shapes.
-The production database/selection/download integration belongs to phase 7.
-"""
+"""Original OOXML slide/relationship copying; never recreates shapes."""
 from contextlib import ExitStack
 from copy import deepcopy
 from dataclasses import dataclass
@@ -28,7 +24,9 @@ class SlideReference:
 
 
 class OriginalSlideExportError(ValueError):
-    pass
+    def __init__(self, message, code="EXPORT_FAILED"):
+        self.code = code
+        super().__init__(message)
 
 
 def _xml(data):
@@ -128,13 +126,25 @@ class _PartCopier:
             if relation.get("TargetMode") != "External":
                 target = _resolve(part, relation.get("Target"))
                 if relation.get("Type").endswith("/slide") and (source_path, target) not in self.selected:
-                    raise OriginalSlideExportError("Include the destination of an internal slide link before exporting.")
+                    raise OriginalSlideExportError("Include the destination of an internal slide link before exporting.","EXPORT_LINK_TARGET_MISSING")
                 copied = self.copy(source_path, target)
                 relation.set("Target", posixpath.relpath(copied, posixpath.dirname(destination)))
             rels.append(relation)
         if len(rels):
             self.output.writestr(_rels_name(destination), _bytes(rels))
         return destination
+
+    def copy_duplicate_slide(self, source_path, part):
+        # Each output occurrence owns its slide and notes; media/layouts stay shared.
+        private = [(source_path,part)]
+        source = self.sources[source_path]
+        private.extend((source_path,_resolve(part,rel.get("Target"))) for rel in source.relationships(part)
+                       if rel.get("Type").endswith("/notesSlide") and rel.get("TargetMode")!="External")
+        previous = {key:self.mapping.pop(key) for key in private if key in self.mapping}
+        try:
+            return self.copy(source_path,part)
+        finally:
+            self.mapping.update(previous)
 
 
 def export_slides(slides: list[SlideReference], output_path: str | Path) -> Path:
@@ -151,16 +161,16 @@ def export_slides(slides: list[SlideReference], output_path: str | Path) -> Path
             sources = {path: _Source(stack.enter_context(ZipFile(path))) for path in source_paths}
             first = sources[source_paths[0]]
             if any(source.size != first.size for source in sources.values()):
-                raise OriginalSlideExportError("Presentations have different slide sizes; automatic scaling is not supported.")
+                raise OriginalSlideExportError("Presentations have different slide sizes; automatic scaling is not supported.","EXPORT_SIZE_MISMATCH")
             for path in source_paths[1:]:
                 fonts = sources[path].presentation.find(f"{{{P}}}embeddedFontLst")
                 if fonts is not None and len(fonts):
-                    raise OriginalSlideExportError("Mixing multiple presentations with embedded fonts has not yet been validated.")
+                    raise OriginalSlideExportError("Mixing multiple presentations with embedded fonts has not yet been validated.","EXPORT_EMBEDDED_FONTS")
             selected = []
             for ref in slides:
                 path = Path(ref.source_path).resolve()
                 if ref.original_slide_id not in sources[path].slides:
-                    raise OriginalSlideExportError("The original slide is missing from its source snapshot.")
+                    raise OriginalSlideExportError("The original slide is missing from its source snapshot.","EXPORT_SLIDE_MISSING")
                 selected.append((path, sources[path].slides[ref.original_slide_id]))
             temporary = stack.enter_context(NamedTemporaryFile(dir=output_path.parent, suffix=".pptx", delete=False))
             with ZipFile(temporary, "w", compression=ZIP_DEFLATED) as output:
@@ -191,8 +201,10 @@ def export_slides(slides: list[SlideReference], output_path: str | Path) -> Path
                     if child is not None:
                         presentation.remove(child)
                 slide_list = ET.Element(f"{{{P}}}sldIdLst")
+                seen = set()
                 for index, (path, part) in enumerate(selected, 256):
-                    target = copier.copy(path, part)
+                    target = copier.copy_duplicate_slide(path,part) if (path,part) in seen else copier.copy(path,part)
+                    seen.add((path,part))
                     rid = relationship(R + "/slide", target)
                     ET.SubElement(slide_list, f"{{{P}}}sldId", id=str(index), **{f"{{{R}}}id": rid})
                 master_list = ET.Element(f"{{{P}}}sldMasterIdLst")

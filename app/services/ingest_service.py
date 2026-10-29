@@ -1,14 +1,20 @@
 from pathlib import Path
+from dataclasses import fields
+from threading import RLock
 
 from app.db.repository import init_db, save_cases
 from app.ingestion.pptx_parser import parse_pptx, build_cases
 from app.ingestion.errors import IngestionError
 from app.ingestion.validation import validate_pptx
-from app.models import FieldProvenance
-from app.services.source_service import release_snapshot, snapshot_local_source
+from app.models import FieldProvenance, SourceRecord
+from app.services.source_service import find_existing_import, release_snapshot, snapshot_local_source
 from app.services.web_enrichment import fetch_case_page
 from app.services.enrichment_service import enrich_source
 from app.services.ai_enrichment import infer_missing_metadata
+
+
+# The demo has one worker. Also keep direct concurrent imports idempotent until commit.
+_import_lock = RLock()
 
 
 def ingest_deck(
@@ -24,6 +30,7 @@ def ingest_deck(
     progress=None,
     refresh_pages: bool = False,
 ) -> dict:
+    """Import new content; reused imports return stored counts without parsed payloads."""
     # All acquired local bytes, including future authorized cloud downloads,
     # enter this same validation/snapshot/parse/commit boundary.
     if source_type not in {"LOCAL", "ONEDRIVE", "SHAREPOINT"}:
@@ -40,20 +47,33 @@ def ingest_deck(
         source_id=source_id,
     )
     try:
-        if progress:
-            progress("Parsing slides", 0, 1)
-        slides = parse_pptx(source.source_snapshot_reference)
-        cases = build_cases(slides, source_deck=source.filename, source_id=source.source_id)
-        if progress:
-            progress("Saving cases", len(cases), len(cases))
-        source.ingestion_status = "PARSED"
-        init_db(db_path)
-        save_cases(
-            db_path,
-            cases,
-            slide_text_by_number={slide.slide_number: slide.text for slide in slides},
-            source=source,
-        )
+        with _import_lock:
+            init_db(db_path)
+            existing = find_existing_import(db_path,source)
+            if existing and existing["source_id"] != source.source_id:
+                release_snapshot(source, db_path, committed=True)
+                if progress:
+                    progress("Presentation already imported",1,1)
+                return {
+                    "source_id":existing["source_id"],
+                    "source":SourceRecord(**{field.name:existing[field.name] for field in fields(SourceRecord)}),
+                    "reused":True,"slide_count":None,"case_slide_count":existing["case_count"],
+                    "case_count":existing["case_count"],"slides":[],"cases":[],
+                    "enrichment":{"status":"SKIPPED"},"ai":{"status":"SKIPPED"},
+                }
+            if progress:
+                progress("Parsing slides", 0, 1)
+            slides = parse_pptx(source.source_snapshot_reference)
+            cases = build_cases(slides, source_deck=source.filename, source_id=source.source_id)
+            if progress:
+                progress("Saving cases", len(cases), len(cases))
+            source.ingestion_status = "PARSED"
+            save_cases(
+                db_path,
+                cases,
+                slide_text_by_number={slide.slide_number: slide.text for slide in slides},
+                source=source,
+            )
     except IngestionError:
         release_snapshot(source, db_path, committed=False)
         raise
@@ -74,6 +94,7 @@ def ingest_deck(
     return {
         "source_id": source.source_id,
         "source": source,
+        "reused":False,
         "slide_count": len(slides),
         "case_slide_count": sum(1 for slide in slides if slide.is_case_study),
         "case_count": len(cases),

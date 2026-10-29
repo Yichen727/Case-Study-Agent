@@ -5,8 +5,9 @@ from pathlib import Path
 import sqlite3
 from uuid import uuid4
 from app.models import REQUIRED_CASE_FIELDS, case_processing_status
+from app.search.documents import sync_documents
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 METADATA_FIELDS = REQUIRED_CASE_FIELDS
 
 SCHEMA = """
@@ -140,6 +141,40 @@ CREATE TABLE IF NOT EXISTS case_reviews (
 CREATE INDEX IF NOT EXISTS reviews_case ON case_reviews(case_id,review_id);
 """
 
+SEARCH_SCHEMA = """
+CREATE TABLE IF NOT EXISTS search_documents (
+    case_id TEXT PRIMARY KEY REFERENCES cases(case_id) ON DELETE CASCADE,
+    content_hash TEXT NOT NULL,
+    document_text TEXT NOT NULL,
+    original_text TEXT NOT NULL
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS cases_fts USING fts5(
+    case_id UNINDEXED,title,pillar,client,services,body,tokenize='porter unicode61'
+);
+CREATE TABLE IF NOT EXISTS embedding_cache (
+    model TEXT NOT NULL,
+    dimensions INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    vector BLOB NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(model,dimensions,content_hash)
+);
+CREATE TABLE IF NOT EXISTS query_intent_cache (
+    cache_key TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS search_usage (
+    usage_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    purpose TEXT NOT NULL,
+    model TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    input_count INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 
 def _backup_legacy_database(path: Path) -> None:
     folder = path.parent / "backups"
@@ -198,10 +233,15 @@ def initialize_database(db_path: str | Path) -> bool:
                 _migrate_legacy_cases(conn)
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS case_source_slide ON cases(source_id, original_slide_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS cases_source ON cases(source_id)")
-            for statement in (TASK_SCHEMA + REVIEW_SCHEMA).split(";"):
+            for statement in (TASK_SCHEMA + REVIEW_SCHEMA + SEARCH_SCHEMA).split(";"):
                 if statement.strip():
                     conn.execute(statement)
+            if "cache_key" not in {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}:
+                conn.execute("ALTER TABLE tasks ADD COLUMN cache_key TEXT")
+            conn.execute("CREATE INDEX IF NOT EXISTS tasks_export_cache ON tasks(owner,cache_key,status)")
             if refresh_case_statuses(conn):
+                conn.execute("UPDATE app_state SET data_version=data_version+1 WHERE singleton=1")
+            if sync_documents(conn):
                 conn.execute("UPDATE app_state SET data_version=data_version+1 WHERE singleton=1")
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         return True

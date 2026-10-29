@@ -21,6 +21,7 @@ from unittest.mock import patch
 from urllib.parse import urlparse
 
 from app.db.repository import init_db, list_cases, save_cases
+from app.config import AISettings
 from app.ingestion.pptx_parser import parse_pptx
 from app.search.keyword_search import search_cases
 from app.services.ingest_service import ingest_deck
@@ -46,6 +47,11 @@ def measure(operation, repetitions: int = 20) -> dict:
 
 
 def baseline(source: Path, manifest: dict) -> dict:
+    with patch("app.config.get_ai_settings",return_value=AISettings()):
+        return _baseline(source,manifest)
+
+
+def _baseline(source: Path, manifest: dict) -> dict:
     timings = {}
     fetched_urls = []
 

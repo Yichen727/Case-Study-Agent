@@ -3,6 +3,8 @@
 python -B -m evaluation.run_stage3 PATH_TO_PPTX
 """
 import argparse
+from shutil import copyfile
+from zipfile import ZipFile
 from io import BytesIO
 import json
 from pathlib import Path
@@ -16,6 +18,7 @@ from streamlit.testing.v1 import AppTest
 from streamlit.testing.v1.element_tree import ElementTree
 
 from app.db.repository import count_cases, list_cases, list_sources
+from app.config import AISettings
 from app.search.keyword_search import search_cases
 from app.services.ingest_service import ingest_deck
 from app.services.task_service import get_task_manager
@@ -45,6 +48,11 @@ class OfflinePage:
 
 
 def benchmark(source):
+    with patch("app.config.get_ai_settings",return_value=AISettings()):
+        return _benchmark(source)
+
+
+def _benchmark(source):
     report = {"scope": "isolated DB; company PPTX; simulated HTTP; AppTest excludes browser painting/upload",
               "source": source.name, "source_bytes": source.stat().st_size}
     entered, release = Event(), Event()
@@ -71,6 +79,12 @@ def benchmark(source):
             initial = ingest_deck(source, db)
             report["first_import"] = {"elapsed_ms": round((perf_counter() - started) * 1000, 3),
                                       "case_count": initial["case_count"], "enrichment": initial["enrichment"]}
+            repeated = ingest_deck(source,db)
+            report["identical_reupload"] = {"reused":repeated["reused"],"stored_cases":count_cases(db)}
+            version = Path(temporary) / "new-file-version.pptx"
+            copyfile(source,version)
+            with ZipFile(version,"a") as deck:
+                deck.comment = b"Byte-distinct version for background import measurement."
             del initial
             manager = get_task_manager(db)
             try:
@@ -85,12 +99,12 @@ def benchmark(source):
                     http.reset_mock()
                     with patch("app.services.ingest_service.fetch_case_page", held_enrichment):
                         started = perf_counter()
-                        task_id = manager.submit_import(source, source.name)
+                        task_id = manager.submit_import(version, source.name)
                         report["queue_submit_including_disk_spool_ms"] = round((perf_counter() - started) * 1000, 3)
                         assert entered.wait(15)
                         report["cases_visible_before_web_finishes"] = count_cases(db)
                         report["search_while_task_running"] = measure(lambda: search_cases(db, "sustainability"), 20)
-                        next(field for field in app.text_input if field.label == "Search cases").set_value("sustainability")
+                        next(field for field in app.text_area if field.label == "Search cases").set_value("sustainability")
                         next(button for button in app.button if button.label == "Search").click().run()
                         report["rendered_search_results"] = len(app.session_state["search_results"])
                         report["ui_rerun_while_task_running"] = measure(lambda: app.run(timeout=30), 5)
@@ -105,7 +119,7 @@ def benchmark(source):
                         task = manager.wait(task_id)
                     assert task["status"] == "SUCCEEDED"
                     report["second_import"] = json.loads(task["result_json"])
-                    report["second_import"]["source_id"] = "independent source ID (omitted)"
+                    report["second_import"]["source_id"] = "independent source ID for byte-distinct version (omitted)"
                     report["second_import_actual_http_calls"] = http.call_count
                     report["stored_sources"] = len(list_sources(db))
                     report["stored_cases"] = count_cases(db)
