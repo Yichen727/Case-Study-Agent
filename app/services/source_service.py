@@ -16,19 +16,17 @@ _snapshot_lock = RLock()
 _leases: dict[str, int] = {}
 
 
-def find_existing_import(db_path, source):
-    """Reuse local bytes, or the same cloud file/version; keep different files separate."""
+def find_local_import(db_path, source):
+    """Reuse identical local uploads without merging independent legacy sources."""
+    if source.source_type != "LOCAL":
+        return None
     with connect(db_path) as conn:
-        sql = """SELECT src.*,
+        row = conn.execute("""SELECT src.*,
                               (SELECT COUNT(*) FROM cases c WHERE c.source_id=src.source_id) AS case_count
-                              FROM sources src WHERE source_type=? AND content_sha256=?
+                              FROM sources src WHERE source_type='LOCAL' AND content_sha256=?
                               AND ingestion_status='PARSED' AND requires_reimport=0
-                              AND source_snapshot_reference=?"""
-        args = [source.source_type,source.content_sha256,source.source_snapshot_reference]
-        if source.source_type!="LOCAL":
-            sql += " AND source_file_id=? AND source_version IS ?"
-            args += [source.source_file_id,source.source_version]
-        row = conn.execute(sql+" ORDER BY imported_at,source_id LIMIT 1",args).fetchone()
+                              AND source_snapshot_reference=? ORDER BY imported_at,source_id LIMIT 1""",
+                           (source.content_sha256,source.source_snapshot_reference)).fetchone()
         return dict(row) if row else None
 
 

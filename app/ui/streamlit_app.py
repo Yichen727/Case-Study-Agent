@@ -20,9 +20,7 @@ from app.ui.review_panel import render_review
 from app.search.embedding_service import index_status
 from app.ui.selection_panel import render_selected_cases
 from app.ui.selection_state import select_case, selected_ids
-from app.ui.export_panel import render_export_panel
 from app.export.slide_export import export_error_message
-from app.ui.microsoft_panel import cloud_auth, render_microsoft_import
 
 PAGE_SIZE = 25
 st.set_page_config(page_title="Case Study Agent", layout="wide")
@@ -32,17 +30,20 @@ if initialized or st.session_state.get("schema_version") != SCHEMA_VERSION:
     for key in ("search_results", "search_request", "metadata_case_id", "export_case_ids",
                 "active_tab", "all_page", "metadata_page", "export_page", "_metadata_case", "_metadata_field",
                 "metadata_show_all", "_metadata_show_all", "selected_case_ids", "confirmed_case_ids",
-                "selection_revision", "match_page", "partial_match_page", "last_export_task_id"):
+                "selection_revision", "match_page", "partial_match_page", "last_export_task_id", "_active_tab"):
         st.session_state.pop(key, None)
     st.session_state["schema_version"] = SCHEMA_VERSION
+# A fast background completion can rerun before the tab widget is rendered.
+# Keep its value outside widget state so completion does not switch the page.
+st.session_state["active_tab"] = st.session_state.get("active_tab",st.session_state.get("_active_tab","Search results"))
+st.session_state["_active_tab"] = st.session_state["active_tab"]
 current_version = data_version(DB_PATH)
 if st.session_state.get("data_version") != current_version:
     st.session_state.pop("search_results", None)
     st.session_state["data_version"] = current_version
 
 manager = get_task_manager(DB_PATH)
-# The local library belongs to the Windows operator; cloud tasks additionally
-# belong to the signed-in Microsoft identity. Credentials stay in session memory.
+# The library belongs to the local Windows operator.
 owner = "local"
 manager.ensure_indexing(owner)
 
@@ -57,14 +58,6 @@ def focus_selection_tab():
 
 def update_selection(case_id, key):
     select_case(st.session_state,case_id,st.session_state[key])
-
-
-def visible_tasks():
-    jobs = manager.list_tasks(owner)
-    auth = cloud_auth()
-    if auth and auth.owner:
-        jobs += manager.list_tasks(auth.owner)
-    return sorted(jobs,key=lambda job:(job["created_at"],job["task_id"]),reverse=True)[:20]
 
 
 def labels(options):
@@ -137,42 +130,37 @@ if notice := st.session_state.pop("notice", None):
 
 with st.sidebar:
     st.header("1. Import presentations")
-    source_mode = st.radio("Presentation source",["Local upload","OneDrive / SharePoint"],horizontal=True)
-    if source_mode=="Local upload":
-        uploaded = st.file_uploader(
-            "Upload approved PowerPoint decks", type=["pptx"], accept_multiple_files=True,
-            key=f"uploads:{st.session_state.get('uploader_version', 0)}",
-        )
-        if uploaded and st.button("Parse and save decks", type="primary"):
-            submitted = 0
-            for index, upload in enumerate(uploaded):
-                try:
-                    manager.submit_import(upload, upload.name, owner)
-                    submitted += 1
-                except TaskQueueFull as exc:
-                    st.session_state["notice"] = (
-                        f"{submitted} files queued; {len(uploaded) - index} were not queued. "
-                        "Please select the remaining files again after an import finishes."
-                    )
-                    break
-                except IngestionError as exc:
-                    st.error(f"{upload.name}: {exc.user_message()}")
-                except Exception as exc:
-                    logging.getLogger(__name__).warning("Could not queue import: %s", type(exc).__name__)
-                    st.error(f"Could not queue {upload.name}. Please try again.")
-            if submitted:
-                st.session_state["uploader_version"] = st.session_state.get("uploader_version", 0) + 1
-                st.rerun()
+    uploaded = st.file_uploader(
+        "Upload approved PowerPoint decks", type=["pptx"], accept_multiple_files=True,
+        key=f"uploads:{st.session_state.get('uploader_version', 0)}",
+    )
+    if uploaded and st.button("Parse and save decks", type="primary"):
+        submitted = 0
+        for index, upload in enumerate(uploaded):
+            try:
+                manager.submit_import(upload, upload.name, owner)
+                submitted += 1
+            except TaskQueueFull as exc:
+                st.session_state["notice"] = (
+                    f"{submitted} files queued; {len(uploaded) - index} were not queued. "
+                    "Please select the remaining files again after an import finishes."
+                )
+                break
+            except IngestionError as exc:
+                st.error(f"{upload.name}: {exc.user_message()}")
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Could not queue import: %s", type(exc).__name__)
+                st.error(f"Could not queue {upload.name}. Please try again.")
+        if submitted:
+            st.session_state["uploader_version"] = st.session_state.get("uploader_version", 0) + 1
+            st.rerun()
 
-    else:
-        render_microsoft_import(manager)
-
-    initial_jobs = visible_tasks()
+    initial_jobs = manager.list_tasks(owner)
     polling = any(job["status"] in {"QUEUED", "RUNNING"} for job in initial_jobs)
 
     @st.fragment(run_every=1.0 if polling else None)
     def show_tasks():
-        jobs = visible_tasks()
+        jobs = manager.list_tasks(owner)
         if jobs:
             st.subheader("Processing")
         for job in jobs:
@@ -182,7 +170,7 @@ with st.sidebar:
                             text=f"{job['stage']} ({job['completed']}/{job['total']})")
             elif job["status"] == "SUCCEEDED":
                 result = json.loads(job["result_json"])
-                if job["kind"] in {"IMPORT","CLOUD_IMPORT"}:
+                if job["kind"] == "IMPORT":
                     if result.get("reused"):
                         st.success(f"Already imported. Using {result['case_count']} existing case-study slides; no new cases added.")
                     else:
@@ -209,8 +197,6 @@ with st.sidebar:
             else:
                 if job["status"] == "INTERRUPTED":
                     st.warning("Processing stopped when the app restarted. Retry to continue.")
-                elif job["kind"]=="CLOUD_IMPORT":
-                    st.error(IngestionError(job["error_code"] if job["error_code"]!="TASK_FAILED" else "FETCH_FAILED").user_message("SHAREPOINT"))
                 elif job["error_code"] in {"INVALID_FILE", "FETCH_FAILED", "PARSE_FAILED"}:
                     st.error(IngestionError(job["error_code"]).user_message())
                 elif job["kind"]=="EXPORT":
@@ -219,19 +205,14 @@ with st.sidebar:
                     st.error("This task could not be completed. Please try again.")
                 if st.button("Retry", key=f"retry:{job['task_id']}"):
                     try:
-                        if not manager.retry(job["task_id"],job["owner"],cloud_auth=cloud_auth()):
+                        if not manager.retry(job["task_id"],job["owner"]):
                             st.info("Please upload the file again.")
                         else:
                             st.rerun()
                     except TaskQueueFull as exc:
                         st.warning(str(exc))
-                    except IngestionError as exc:
-                        st.error(exc.user_message("SHAREPOINT"))
         if jobs and st.button("Clear finished tasks"):
             manager.clear_finished(owner)
-            auth = cloud_auth()
-            if auth and auth.owner:
-                manager.clear_finished(auth.owner)
             st.rerun()
         if any(job["kind"]=="EXPORT" for job in jobs):
             st.caption("Clearing finished tasks also removes their generated PPTX files. Original decks are retained.")
@@ -275,8 +256,12 @@ with st.sidebar:
                 except (RuntimeError, OSError):
                     st.error("Unused snapshots could not be removed. Please check again and retry.")
 
-tab_search, tab_all, tab_metadata, tab_selected, tab_export = st.tabs(
-    ["Search results", "All cases", "Needs Review", "Selected cases", "Export"],
+if st.session_state.get("active_tab") == "Export":
+    focus_selection_tab()
+st.session_state["_active_tab"] = st.session_state["active_tab"]
+
+tab_search, tab_all, tab_metadata, tab_selected = st.tabs(
+    ["Search results", "All cases", "Needs Review", "Selected cases"],
     key="active_tab", on_change="rerun",
 )
 
@@ -299,7 +284,6 @@ def render_search_results():
     elif not results:
         st.warning("No matching cases. Try a broader keyword.")
     if request:
-        st.caption("Hybrid search" if getattr(results,"mode","keyword")=="hybrid" else "Keyword-only search")
         for notice in getattr(results,"notices",[]):
             st.info(notice)
         if intent := getattr(results,"intent",None):
@@ -326,7 +310,7 @@ if tab_search.open:
 
 if tab_selected.open:
     with tab_selected:
-        render_selected_cases(DB_PATH)
+        render_selected_cases(DB_PATH,manager,owner)
 
 if tab_all.open:
     with tab_all:
@@ -382,7 +366,3 @@ if tab_metadata.open:
                             st.rerun()
                         except TaskQueueFull as exc:
                             st.warning(str(exc))
-
-if tab_export.open:
-    with tab_export:
-        render_export_panel(DB_PATH,manager,owner,focus_selection_tab)

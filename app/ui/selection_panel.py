@@ -8,6 +8,7 @@ from app.ui.selection_state import (
     confirm_order, export_order_snapshot, remove_cases, reorder_cases, selected_ids,
 )
 from app.ui.selected_case_list import selected_case_list
+from app.ui.export_panel import render_export_panel
 
 
 def selection_labels(cases):
@@ -23,12 +24,18 @@ def selection_labels(cases):
 
 
 @st.fragment
-def render_selected_cases(db_path):
+def render_selected_cases(db_path, manager, owner):
+    cases = render_order(db_path)
+    st.divider()
+    render_export_panel(db_path,manager,owner,cases)
+
+
+def render_order(db_path):
     st.subheader("Selected cases")
     ids = selected_ids(st.session_state)
     if not ids:
         st.info("Choose cases using the checkboxes in Search results.")
-        return
+        return []
     cases = case_options_by_ids(db_path,list(ids))
     names = selection_labels(cases)
     if any(case_id not in names for case_id in ids):
@@ -36,7 +43,7 @@ def render_selected_cases(db_path):
         st.warning("Cases no longer in the library were removed from the selection.")
         ids = selected_ids(st.session_state)
         if not ids:
-            return
+            return []
     st.caption(f"{len(ids)} cases selected. Drag to set the final slide order.")
     items = [names[case_id] for case_id in ids]
     # Reset the component after membership, order, or displayed metadata changes.
@@ -59,3 +66,4 @@ def render_selected_cases(db_path):
         st.success(f"Order confirmed for {len(snapshot)} slides.")
     else:
         st.caption("Confirm the order when ready. Adding, removing or reordering cases requires a new confirmation.")
+    return cases

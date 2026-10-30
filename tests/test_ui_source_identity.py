@@ -119,8 +119,8 @@ def test_ui_imports_two_decks_and_displays_distinct_sources(tmp_path, monkeypatc
     assert app.session_state["selected_case_ids"] == tuple(first_pages)
     next(button for button in app.button if button.label=="Confirm order").click().run()
     assert app.session_state["confirmed_case_ids"] == tuple(first_pages)
-    tab(app,"Export")
-    assert any(item.value=="Confirmed selection: 2 slides." for item in app.success)
+    assert not next(button for button in app.button if button.label=="Generate PPTX").disabled
+    assert all(item.label!="Export" for item in app.tabs)
     tab(app,"Search results")
     app.checkbox(key=f"case-select:{first_pages[0]}").uncheck().run()
     assert not app.exception
@@ -381,16 +381,30 @@ def test_ui_export_requires_confirmation_reuses_task_and_defers_file_reads(tmp_p
     monkeypatch.setattr("app.ui.export_panel.download_bytes",reads)
     app = AppTest.from_file(str(root / "app/ui/streamlit_app.py")).run(timeout=30)
     app.session_state["selected_case_ids"] = ids
-    tab(app,"Export")
+    tab(app,"Selected cases")
     assert next(button for button in app.button if button.label=="Generate PPTX").disabled
-    app.session_state["confirmed_case_ids"] = ids
-    app.run()
+    assert all(item.label!="Export" for item in app.tabs)
+    next(button for button in app.button if button.label=="Confirm order").click().run()
+    assert not next(button for button in app.button if button.label=="Generate PPTX").disabled
+    assert not any(item.label=="Slide order" for item in app.expander)
     next(button for button in app.button if button.label=="Generate PPTX").click().run()
     manager = get_task_manager(db)
     task_id = app.session_state["last_export_task_id"]
     assert manager.wait(task_id)["status"]=="SUCCEEDED"
-    app.run()
+    list_tasks=manager.list_tasks
+    calls=0
+    def completing_tasks(owner):
+        nonlocal calls
+        calls+=1
+        jobs=list_tasks(owner)
+        # Simulate completion between the sidebar's two status reads.
+        return [{**job,"status":"RUNNING"} if job["task_id"]==task_id else job for job in jobs] if calls==1 else jobs
+    with monkeypatch.context() as completion:
+        completion.setattr(manager,"list_tasks",completing_tasks)
+        app.run()
     assert not app.exception and len(app.get("download_button"))==1
+    assert app.session_state["active_tab"]=="Selected cases"
+    assert not any(item.label=="Slides in this file" for item in app.expander)
     reads.assert_not_called()
     next(button for button in app.button if button.label=="Generate PPTX").click().run()
     assert app.session_state["last_export_task_id"]==task_id
@@ -399,6 +413,11 @@ def test_ui_export_requires_confirmation_reuses_task_and_defers_file_reads(tmp_p
     app.run()
     assert len(app.get("download_button"))==1
     assert any("Your current selection is different" in item.value for item in app.info)
+    assert any(item.label=="Slides in this file" for item in app.expander)
+    assert next(button for button in app.button if button.label=="Generate PPTX").disabled
+    app.session_state["active_tab"] = "Export"
+    app.run()
+    assert not app.exception and app.session_state["active_tab"]=="Selected cases"
     reads.assert_not_called()
 
 

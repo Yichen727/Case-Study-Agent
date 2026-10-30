@@ -7,7 +7,7 @@ from app.ingestion.pptx_parser import parse_pptx, build_cases
 from app.ingestion.errors import IngestionError
 from app.ingestion.validation import validate_pptx
 from app.models import FieldProvenance, SourceRecord
-from app.services.source_service import find_existing_import, release_snapshot, snapshot_local_source
+from app.services.source_service import find_local_import, release_snapshot, snapshot_local_source
 from app.services.web_enrichment import fetch_case_page
 from app.services.enrichment_service import enrich_source
 from app.services.ai_enrichment import infer_missing_metadata
@@ -31,7 +31,7 @@ def ingest_deck(
     refresh_pages: bool = False,
 ) -> dict:
     """Import new content; reused imports return stored counts without parsed payloads."""
-    # All acquired local bytes, including future authorized cloud downloads,
+    # All acquired local bytes, including existing source snapshots,
     # enter this same validation/snapshot/parse/commit boundary.
     if source_type not in {"LOCAL", "ONEDRIVE", "SHAREPOINT"}:
         raise IngestionError("UNSUPPORTED_SOURCE")
@@ -49,7 +49,7 @@ def ingest_deck(
     try:
         with _import_lock:
             init_db(db_path)
-            existing = find_existing_import(db_path,source)
+            existing = find_local_import(db_path,source)
             if existing and existing["source_id"] != source.source_id:
                 release_snapshot(source, db_path, committed=True)
                 if progress:

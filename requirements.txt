@@ -9,4 +9,3 @@ openai>=2.41.1
 pydantic>=2.0
 python-dotenv>=1.0
 numpy>=1.26
-msal>=1.31

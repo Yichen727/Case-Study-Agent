@@ -4,6 +4,8 @@
 
 产品基线：**Updated MVP Design Baseline v1.2**，以及用户于 2026-10-29 确认的后续规则：元数据自动补全、七字段齐全即 Confirmed、缺失即 Needs Review，取消逐字段审批；搜索只用一个自由文本输入框，由 AI 识别条件。后续规则优先于此前冲突的设计；实施进度见 [PLAN.md](PLAN.md)。
 
+2026-10-30 更新：仅保留本地 PPTX 上传。需要云端材料时，先自行下载到本机，再上传到 Demo。此范围取代原基线中的云端连接导入要求。
+
 ## 产品目标与工作流
 
 采用 **Single Workflow Architecture**，遵循 **Deterministic First**：
@@ -15,16 +17,15 @@ PPTX 导入 → 幻灯片识别与提取 → AI 元数据补充 → Slice Case �
 
 确定性规则优先完成文件验证、内容提取、证据检查和导出；AI 用于必要的元数据推断、搜索请求理解与语义检索。架构不引入 Multi-Agent。
 
-## v1.2 需求
+## 当前确认需求（v1.2 及后续修订）
 
 ### 文件导入与来源
 
-- 支持本地 `.pptx` 上传，以及 OneDrive / SharePoint Online 的 PowerPoint 链接，包括 Office 在线打开或编辑链接。
-- 云端导入先验证地址、认证状态及当前用户读取权限，再通过只读 Microsoft Graph API 获取文件。阶段 8 支持公司账户的完整文件路径链接，真实租户授权仍待配置后验证，范围见下方 Microsoft setup。
-- 本地与云端文件通过同一套 PPTX 验证、解析和导出流程；读取不修改云端原件。
-- 成功导入保留原始文件快照，避免云端更新导致检索内容与导出内容不一致。
-- 每个来源记录 `source_id`、`source_type`（`LOCAL` / `ONEDRIVE` / `SHAREPOINT`）、适用的 `original_source_url`、可获取的 `source_file_id` / `source_version`、`imported_at`、`ingestion_status`、`source_snapshot_reference`。
-- 使用最小权限，安全保存访问令牌，限制外部访问地址；读取权限不等于任意重新分发许可，仅处理已授权且符合内部使用要求的材料。
+- 从本机选择已授权的 `.pptx`，支持多文件上传和后台处理。
+- 按同一流程验证实际文件、保存原件快照、解析并入库；导出使用导入时的快照。
+- 每份来源保留独立 source ID、文件名、内容 SHA-256、导入时间、处理状态和快照引用；案例关联原始 Slide ID 与页码。
+- 相同内容重复上传不增加案例，保留人工修改；不同内容和版本独立保留。
+- 既有来源与案例记录继续兼容，不修改原始材料。
 
 ### 独立 Slice Case
 
@@ -68,28 +69,21 @@ PPTX 导入 → 幻灯片识别与提取 → AI 元数据补充 → Slice Case �
 
 ### 导入错误
 
-验证失败即停止导入，不创建无效 Case Records。前端只显示安全提示，并按错误提供 Retry、Reconnect 或 Local Upload 操作。
+验证失败即停止导入，不创建无效案例；前端只显示安全提示，修正文件后可重试。
 
 | Error Code | UI 提示 |
 | --- | --- |
-| `INVALID_URL` | Please enter a valid OneDrive or SharePoint link. |
-| `UNSUPPORTED_SOURCE` | This source is not supported. Please use OneDrive, SharePoint or local upload. |
-| `AUTH_REQUIRED` | Sign in with Microsoft to access this presentation. |
-| `ACCESS_DENIED` | You don't have permission to access this file. |
-| `FILE_NOT_FOUND` | The presentation could not be found. Please check the link. |
-| `INVALID_FILE` | The linked file is not a valid PowerPoint presentation. |
-| `FETCH_FAILED` | Unable to retrieve the file. Please try again. |
-| `PARSE_FAILED` | The presentation was retrieved but could not be processed. |
-
-以上为链接导入的标准提示；本地文件验证复用错误分类，提示文案按上传场景调整。令牌、原始认证信息和敏感内部错误不传到前端。
+| `INVALID_FILE` | Please upload a valid .pptx file within the supported size limits. |
+| `FETCH_FAILED` | Unable to read or save the uploaded file. Please try again. |
+| `PARSE_FAILED` | The uploaded presentation could not be processed. Please check the file and try again. |
 
 ## 当前 Demo 实际能力
 
-技术栈：Python、Streamlit、python-pptx、SQLite、requests、BeautifulSoup、MSAL。
+技术栈：Python、Streamlit、python-pptx、SQLite、requests、BeautifulSoup。
 
 | 模块 | 当前实现 | 尚待完成 |
 | --- | --- | --- |
-| 导入 | 本地多选上传；公司 OneDrive / SharePoint 完整路径链接、Microsoft 登录与后台只读下载；统一验证 / 快照 / 解析，有界队列与重试 | 配置 Entra 应用后验证真实公司登录、权限和下载 |
+| 导入 | 本地多选上传、后台验证 / 快照 / 解析；有界队列、进度和失败重试 | 持续真实样本验收 |
 | 解析 | 提取标准章节、非标准标题、同段 BRIEF、组合形状、原始 Slide ID、页码及文本 / 形状链接类型 | 按后续真实样本完善必要结构，不自动重写正文 |
 | Slice Case | `source_id:original_slide_id` 唯一身份；同名文件、相同页码及相同原始 Slide ID 跨来源隔离 | 后续选择、排序和导出继续沿用该身份 |
 | 元数据 | 原文 / 网页优先，后台 OpenAI 补缺失 Client / Services，要求原文引用；推断缓存及完整来源 / 修改历史 | 公司样本的 AI 质量标注与校准 |
@@ -123,32 +117,7 @@ python -m pip install -r requirements.txt
 python run.py
 ```
 
-未配置 OpenAI Key 仍可导入、检索和人工审核；Microsoft 登录需要下方应用注册配置，本地上传不受影响。若系统的 `python` 指向不可用的 Windows 应用别名，请使用实际 Python 解释器执行上述命令。
-
-### Microsoft setup
-
-阶段 8 按本机 Windows、公司 Microsoft 365 账户实现。你给出的 `https://freud.sharepoint.com/:p:/r/sites/Atomized1/Shared%20Documents/.../presentation.pptx?...` 属于支持格式，粘贴完整浏览器地址即可，不需要下载地址。
-
-首次使用需要公司 Microsoft Entra 中的一次应用注册；如果没有注册权限，请让公司 IT 完成以下设置：
-
-1. 创建单租户应用，例如 `Case Study Agent Demo`，账户类型选择仅此组织目录。
-2. Authentication 中添加 **Mobile and desktop applications** 平台，Redirect URI 设置为 `http://localhost`。本机浏览器登录使用 MSAL 交互式授权和 PKCE，见 [Microsoft 登录说明](https://learn.microsoft.com/en-us/entra/msal/python/getting-started/acquiring-tokens)。
-3. API permissions 添加 Microsoft Graph → **Delegated permissions → Sites.Read.All**。这是本实现按站点路径定位文件所需的只读委托权限；应用仍受当前登录用户的读取权限限制。按公司策略完成用户或管理员同意，不添加 Application 权限或读写权限。见 [站点 API 权限](https://learn.microsoft.com/en-us/graph/api/site-get?view=graph-rest-1.0)。
-4. 将 Overview 中的 **Directory (tenant) ID** 和 **Application (client) ID** 填入根目录 `.env`。两个 ID 都是应用标识，不是密码；不需要 Client Secret：
-
-```dotenv
-MICROSOFT_TENANT_ID=填写目录租户ID
-MICROSOFT_CLIENT_ID=填写应用客户端ID
-MICROSOFT_SHAREPOINT_HOSTS=freud.sharepoint.com,freud-my.sharepoint.com
-```
-
-重启 Demo，左侧 Presentation source 选择 OneDrive / SharePoint → Sign in with Microsoft → 在本机浏览器使用公司账户登录 → 粘贴链接 → Import presentation。下载、解析、补全与索引在后台执行，可继续搜索已有案例；失败后按提示 Reconnect / Retry，或切回 Local upload。
-
-只支持允许租户域名下带 `.pptx` 文件路径的公司 SharePoint / OneDrive 链接，包括 `/:p:/r/` 在线打开 / 编辑地址、直接路径，以及包含文件路径 `id` 的 `onedrive.aspx` 地址。首版不解析 `1drv.ms` 短链接、`/:p:/s/` 不透明分享码、仅含文件 GUID 的 `Doc.aspx`，也不支持个人消费者 OneDrive；请从浏览器复制带完整文件路径的地址或本地上传。
-
-身份凭据仅在当前服务端会话内存保存，Disconnect 清空凭据；关闭 / 重启 Demo 后需重新登录。普通页面刷新、选择和排序不检查云端版本、不重复下载。Graph 的认证只用于固定 API；下载跳转仅接受允许租户及受信 Microsoft 下载域名，不转发 Graph 令牌，见 [官方文件下载流程](https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0)。当前配置尚缺应用 ID，真实登录与公司权限验收待进行，详见 [阶段 8](evaluation/STAGE8.md)。
-
-云端导入按文件 ID、版本和内容哈希复用：相同文件版本重复导入不增加案例，保留人工修改；不同文件或新版本独立保留。本地与云端来源独立，即使文件内容一致也不混淆身份；相同内容可以共用原件快照。导入后云端变化不会改变旧案例的导出内容。
+未配置 OpenAI Key 仍可本地上传、关键词检索和人工纠错。若系统的 `python` 指向不可用的 Windows 应用别名，请使用实际 Python 解释器执行上述命令。
 
 ### OpenAI 配置
 
@@ -184,17 +153,19 @@ OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 
 ### 导出原始 PPTX
 
-打开 Export，核对 Slide order，然后点击 Generate PPTX；后台完成后点击 Download PPTX。任务固定使用点击时已确认的顺序，之后继续搜索或修改选择不会改变正在生成的文件。相同选择、快照和引擎版本复用任务或已有文件，不重复生成。
+Selected cases 的排序区域下方紧接 Export PPTX：确认顺序后点击 Generate PPTX，后台完成后在同一页点击 Download PPTX。取消独立 Export 标签页和重复的顺序列表；增删或重排后需要重新确认，生成按钮会同步更新状态。
+
+任务固定使用点击时已确认的顺序，之后继续搜索或修改选择不会改变正在生成的文件。相同选择、快照和引擎版本复用任务或已有文件，不重复生成。仅当当前选择与已生成文件不同，才显示旧文件提示及可展开的 Slides in this file 供核对。
 
 导出直接复制原始快照中的幻灯片、布局、媒体和关系，不将索引元数据改写到原片。Needs Review 和未验证 AI 元数据仍显示提示，但不阻止导出。缺原件、快照变化或不支持的页面尺寸组合会给出明确提示。
 
 生成文件保留在 `data/exports/`；Clear finished tasks 同时清理对应终态任务和生成文件，保留原件。下载内容仅在点击时读取，不在每次页面刷新时加载大 PPTX。当前库已备份升级到 schema 6，原有 60 条案例和 328 条修改历史不变。步骤、样本及限制见 [阶段 7](evaluation/STAGE7.md)。
 
-当前按本地单用户运行，服务监听 `127.0.0.1`。本地任务属于本地操作人，云端任务绑定登录的 Microsoft 身份；凭据不存入任务或数据库。案例库仍为本地操作人的共享库，不应直接以此配置部署为多用户服务。
+当前按本地单用户运行，服务监听 `127.0.0.1`，任务和案例库属于本地 Windows 操作人。
 
 SQLite 默认位置为 `data/case_studies.sqlite3`。首次启动新版会先备份旧数据库到 `data/backups/`，再进行版本化事务迁移。旧记录、正文和修改历史保留；旧 `confirmed` 转为 `NEEDS_REVIEW`。旧记录缺原始快照和 Slide ID 时标记为需重导入，不猜测原件关联。请使用已授权的测试材料。
 
-阶段 1–7 已交付且获用户确认；阶段 8 云端导入代码与离线验证完成，待配置应用并进行真实公司账户验收。历史记录见 [阶段 8](evaluation/STAGE8.md)、[阶段 4](evaluation/STAGE4.md)、[阶段 3](evaluation/STAGE3.md)、[阶段 1](evaluation/STAGE1.md)、[阶段 2](evaluation/STAGE2.md)。
+阶段 1–7 已交付且获用户确认；后续仅进行本地工作流的整体验收与性能收敛，见 [PLAN.md](PLAN.md)。
 
 ## 验证与评估
 
@@ -202,7 +173,7 @@ SQLite 默认位置为 `data/case_studies.sqlite3`。首次启动新版会先备
 python -m pytest -q
 ```
 
-阶段 8 完整离线回归 **161 项通过**，含 31 项新增 Microsoft 导入 / 认证检查及模拟登录的界面检查。真实 Edge 的选择、拖拽、×、确认、生成、实际下载、复用和清理回归另行记录。公司 8 页导出样本的 slide XML 逐字节一致，外链和 24 个媒体 / 图表 / 嵌入部件检查通过；阶段 7 已获用户确认。普通 pytest 屏蔽本地 OpenAI 配置，Microsoft 测试替换认证和 HTTP，不访问真实公司文件；离线通过不等同于真实租户验证。
+本地工作流完整离线回归 **130 项通过**（2026-10-30，33.44 秒）。公司 8 页导出样本的 slide XML 逐字节一致，外链和 24 个媒体 / 图表 / 嵌入部件检查通过；阶段 7 已获用户确认。普通 pytest 屏蔽本地 OpenAI 配置，全部离线运行。
 
 本次已备份并将旧库中同一文件的 4 次重复导入从 240 条案例归并为 60 条；修改历史及 AI 处理记录保留。处理记录与去重边界见 [重复上传修复](evaluation/DUPLICATE_IMPORTS.md)。
 
@@ -218,7 +189,7 @@ python -B -m evaluation.run_stage5 --live --cold --output evaluation/stage5_rete
 
 阶段 0 已完成本地样本与离线测量，见 [基线报告](evaluation/BASELINE.md)。`evaluation/` 提供公司样本的人工预期、可复现测量脚本，以及用于跨来源身份和导出检查的合成 PPT；公司原件未复制到仓库。该基线不含真实云端 / AI 调用或浏览器绘制耗时。
 
-最终评估包括：本地上传成功率、OneDrive / SharePoint 导入成功率、认证与权限错误处理、源文件完整性、AI 元数据推断准确率、检索与分类质量、人工审核正确性、自定义排序正确性、原始 PPTX 导出保真度，以及处理耗时与 API 成本。**先用实际样本建立基线，再确定目标阈值。**
+最终评估包括：本地上传成功率、源文件完整性、AI 元数据推断准确率、检索与分类质量、人工审核正确性、自定义排序正确性、原始 PPTX 导出保真度，以及处理耗时与 API 成本。**先用实际样本建立基线，再确定目标阈值。**
 
 ## 实现约束
 
@@ -240,8 +211,6 @@ app/
   services/ingest_service.py 验证、快照、解析、先入库后补充
   services/task_service.py   有界后台执行、任务状态、重试
   services/source_service.py 共享快照、引用保护及显式清理
-  services/microsoft_auth.py 本机浏览器登录、内存凭据与断开连接
-  services/microsoft_source.py 允许租户链接解析、只读 Graph 与受限下载
   services/enrichment_service.py 网页补充编排、去重与写入保护
   services/web_enrichment.py 允许域名抓取、预算及持久缓存
   services/ai_enrichment.py  OpenAI 结构化推断、证据校验、缓存与用量
@@ -258,10 +227,9 @@ app/
   ui/streamlit_app.py       Streamlit 界面
   ui/review_panel.py        简洁纠错表单与折叠原文来源
   ui/selection_state.py     有序案例选择、确认与导出顺序快照
-  ui/selection_panel.py     Selected cases 拖拽、移除及确认界面
+  ui/selection_panel.py     Selected cases 排序、移除、确认与导出合并界面
   ui/selected_case_list.py  内置轻量拖拽列表及单条 × 移除组件
-  ui/export_panel.py       后台生成、确认顺序预览及延迟下载
-  ui/microsoft_panel.py    Microsoft 登录、链接输入及后台导入
+  ui/export_panel.py       同页后台生成、旧文件提示及延迟下载
 tests/                      基础测试
 evaluation/                 样本预期、测量脚本、初始基线和合成 PPT
 run.py                      本地启动入口

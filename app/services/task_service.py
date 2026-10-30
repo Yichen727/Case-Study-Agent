@@ -17,7 +17,6 @@ from app.ingestion.validation import MAX_FILE_BYTES
 from app.services.enrichment_service import enrich_source
 from app.services.ingest_service import ingest_deck
 from app.services.ai_enrichment import infer_missing_metadata
-from app.services.microsoft_source import parse_cloud_link, MicrosoftSource
 
 
 class TaskQueueFull(RuntimeError):
@@ -33,7 +32,6 @@ class TaskManager:
         self._lock = RLock()
         self._futures = {}
         self._index_failure = None
-        self._cloud_credentials = {}
         self.closed = False
         with connect(self.db_path) as conn:
             conn.execute("UPDATE ai_runs SET status='INTERRUPTED',error_code='INTERRUPTED',finished_at=CURRENT_TIMESTAMP WHERE status='RUNNING'")
@@ -84,57 +82,6 @@ class TaskManager:
             self._capacity.release()
             raise
         return task_id
-
-    def submit_cloud_import(self, url, auth):
-        settings = config.get_microsoft_settings()
-        link = parse_cloud_link(url,settings)
-        if auth is None:
-            raise IngestionError("AUTH_REQUIRED")
-        auth.check_active()
-        self._reserve()
-        task_id = uuid4().hex
-        payload = {"source_url":link.original_url,"source_id":task_id,"source_type":link.source_type,
-                   "input_path":str(self.db_path.parent / "incoming" / f"{task_id}.pptx"),"refresh_pages":False}
-        try:
-            self._cloud_credentials[task_id] = auth
-            self._create(task_id,"CLOUD_IMPORT",link.filename,auth.owner,payload)
-        except Exception:
-            self._cloud_credentials.pop(task_id,None)
-            self._capacity.release()
-            raise
-        return task_id
-
-    def _cloud_import(self, task, payload, progress):
-        auth = self._cloud_credentials.get(task["task_id"])
-        if auth is None or auth.owner!=task["owner"]:
-            raise IngestionError("AUTH_REQUIRED")
-        settings = config.get_microsoft_settings()
-        link = parse_cloud_link(payload["source_url"],settings)
-        client = MicrosoftSource(auth,settings)
-        try:
-            progress("Checking Microsoft file access",0,1)
-            item = client.resolve(link)
-            with connect(self.db_path) as conn:
-                previous = conn.execute("SELECT * FROM sources WHERE source_id=?",(payload["source_id"],)).fetchone()
-            if previous:
-                # A retry after commit continues enrichment on the original snapshot.
-                if previous["source_file_id"]!=item["source_file_id"]:
-                    raise IngestionError("FILE_NOT_FOUND")
-                enrichment = enrich_source(previous["source_id"],self.db_path,progress=progress,refresh=True)
-                enrichment.pop("applied")
-                ai = infer_missing_metadata(previous["source_id"],self.db_path,progress=progress)
-                with connect(self.db_path) as conn:
-                    count = conn.execute("SELECT COUNT(*) FROM cases WHERE source_id=?",(previous["source_id"],)).fetchone()[0]
-                return {"source_id":previous["source_id"],"slide_count":None,"case_count":count,
-                        "enrichment":enrichment,"ai":ai,"reused":True}
-            client.download(item,payload["input_path"],progress)
-            result = ingest_deck(payload["input_path"],self.db_path,source_deck=item["filename"],
-                                 source_id=payload["source_id"],source_type=item["source_type"],
-                                 original_source_url=item["original_source_url"],source_file_id=item["source_file_id"],
-                                 source_version=item["version"],progress=progress,refresh_pages=payload["refresh_pages"])
-            return {key:result[key] for key in ("source_id","slide_count","case_count","enrichment","ai","reused")}
-        finally:
-            client.close()
 
     def submit_export(self, case_ids, owner="local"):
         plan = prepare_export(self.db_path,tuple(case_ids))
@@ -241,9 +188,6 @@ class TaskManager:
                                      refresh_pages=payload["refresh_pages"])
                 summary = {key: result[key] for key in ("source_id", "slide_count", "case_count", "enrichment", "ai", "reused")}
                 summary["index"] = self._build_index(result["source_id"],progress)
-            elif task["kind"] == "CLOUD_IMPORT":
-                summary = self._cloud_import(task,payload,progress)
-                summary["index"] = self._build_index(summary["source_id"],progress)
             elif task["kind"] == "ENRICH":
                 result = enrich_source(payload["source_id"], self.db_path, progress=progress,
                                        refresh=payload["refresh_pages"])
@@ -269,8 +213,6 @@ class TaskManager:
             code = exc.code if isinstance(exc,(IngestionError,CaseExportError,OriginalSlideExportError)) else "TASK_FAILED"
             logging.getLogger(__name__).warning("Background task failed: %s", code)
             self._update(task_id, status="FAILED", stage="Could not complete this task", error_code=code)
-        finally:
-            self._cloud_credentials.pop(task_id,None)
 
     def get_task(self, task_id, owner=None):
         with connect(self.db_path) as conn:
@@ -295,17 +237,13 @@ class TaskManager:
                 args.append(limit)
             return [dict(row) for row in conn.execute(sql,args).fetchall()]
 
-    def retry(self, task_id, owner="local", cloud_auth=None):
+    def retry(self, task_id, owner="local"):
         task = self.get_task(task_id, owner)
         if not task or task["status"] not in {"FAILED", "INTERRUPTED"}:
             return False
         payload = json.loads(task["payload_json"])
         if task["kind"] == "IMPORT" and not Path(payload["input_path"]).is_file():
             return False
-        if task["kind"]=="CLOUD_IMPORT":
-            if cloud_auth is None or cloud_auth.owner!=owner:
-                raise IngestionError("AUTH_REQUIRED")
-            cloud_auth.check_active()
         self._reserve()
         with connect(self.db_path) as conn:
             updated = conn.execute("""UPDATE tasks SET status='QUEUED',stage='Queued',error_code=NULL,
@@ -315,8 +253,6 @@ class TaskManager:
         if not updated.rowcount:
             self._capacity.release()
             return False
-        if task["kind"]=="CLOUD_IMPORT":
-            self._cloud_credentials[task_id] = cloud_auth
         self._enqueue(task_id)
         return True
 

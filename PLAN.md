@@ -4,7 +4,7 @@
 
 本文记录实施计划与进度，功能完成情况以阶段待办和验收记录为准。尚未找到独立的原始规划报告；本文保留 v1.2 明列的评估项目，后续若提供原报告，再补齐其中额外指标。
 
-当前进度：**阶段 0–7 已交付且用户确认正常；阶段 8 的公司 OneDrive / SharePoint 导入实现与离线验证已完成，待配置 Entra 应用并验收真实公司登录和下载**。详见 [阶段 0](evaluation/BASELINE.md)、[阶段 1](evaluation/STAGE1.md)、[阶段 2](evaluation/STAGE2.md)、[阶段 3](evaluation/STAGE3.md)、[阶段 4](evaluation/STAGE4.md)、[阶段 5](evaluation/STAGE5.md)、[阶段 6](evaluation/STAGE6.md)、[阶段 7](evaluation/STAGE7.md)、[阶段 8](evaluation/STAGE8.md)。阶段 9 尚未开始。
+当前进度：**阶段 0–7 已交付且用户确认正常；当前仅保留本地上传，后续进行整体验收与性能收敛**。
 
 最新确认（2026-10-29）：自动补全元数据，取消逐字段确认 / Approve / Reopen。七个核心字段齐全才 Confirmed，任何缺失都 Needs Review，包括 Brief / Creative / Impact。Needs Review 取消分页、默认只列缺失记录，保留完整案例纠错入口。此规则覆盖此前冲突的审批设计。
 
@@ -14,7 +14,7 @@
 
 ## 1. 目标与开发约束
 
-最终交付一个单工作流应用：从本地或经授权的 Microsoft 云端文件导入原始 PPTX，建立独立 Slice Case，补充并审核元数据，执行混合检索与分类，选择和自定义排序，导出原始可编辑幻灯片。
+最终交付一个单工作流应用：从本机上传原始 PPTX，建立独立 Slice Case，补充并审核元数据，执行混合检索与分类，选择和自定义排序，导出原始可编辑幻灯片。
 
 用户对代码风格和性能的要求：
 
@@ -74,7 +74,6 @@
 - `sources` 保存 `source_id`、`source_type`、`original_source_url`、`source_file_id`、`source_version`、`imported_at`、`ingestion_status`、`source_snapshot_reference`，并记录文件名和内容 SHA-256 以验证完整性。
 - 每个成功导入对应不可变的来源记录与快照关联。快照由应用生成路径，客户端不提供任意文件路径。
 - 本地重复上传按内容 SHA-256 复用已有导入，改名不新增来源或案例；不同内容 / 新版本仍独立。此用户修订取代此前“每次显式上传均新增一份案例”的规则，不影响不同文件内同名案例及页码的隔离。
-- 云端文件发生更新时创建新导入，不覆盖旧快照；阶段 8 按云端文件 ID、版本和内容哈希复用同一版本，不仅凭名称判断相同文件。
 - 同一导入任务 Retry 复用该任务身份并继续未完成处理；普通重复上传跳过解析与元数据补全，不覆盖人工修改。
 
 ### Slice Case 与字段来源
@@ -108,7 +107,7 @@
 - [x] 记录公司提供的 83 页 PPTX、主模板和第 19–25 页处理约定；只读检查已完成，尚未导入或修改原件。
 - [x] 标注预期 Slice Case 集合、18 页的字段 / 链接证据、5 个初始查询和硬约束样例；原文件保留供人工对照。完整相关性与 AI 标注随对应阶段扩充。
 - [x] 测量离线导入、查询和 AppTest 重运行耗时，记录 60 条案例规模、页面重复读取及网页访问机会；未执行真实 HTTP，在线延迟明确待测。
-- [x] 确认本地 Windows、公司 Microsoft 账户及已安装 PowerPoint；应用注册权限记录为待确认，阶段 8 前核实。
+- [x] 确认本地 Windows、公司 Microsoft 账户及已安装 PowerPoint。
 
 验收：有可复现的样本和初始测量记录；未知能力写为待验证，不预设成功率或延迟目标。
 
@@ -133,7 +132,7 @@
 
 主要修改：`services/ingest_service.py`、`ingestion/pptx_parser.py`；增加小型来源、快照及导入错误模块。
 
-- [x] 统一“已获取文件 → 验证 → 快照 → 解析 → 事务入库”入口，保留本地 / 云端来源信息；云端下载与认证仍属阶段 8。
+- [x] 统一“已获取文件 → 验证 → 快照 → 解析 → 事务入库”入口，保留来源信息和既有记录兼容。
 - [x] 校验实际 ZIP / PPTX 主文档与必要结构，限制文件 / 解包 / XML 大小和条目数，拒绝危险路径及 XML 实体声明。
 - [x] 短事务提交来源、案例和字段来源；失败回滚和快照清理通过测试。
 - [x] 从显式 Client / Services 标签确定性提取，原文优先；网页跳转逐步限制为允许域名，缓存及后台调度仍属阶段 3。
@@ -221,7 +220,7 @@
 - [x] 排序与单条移除共用一个 Streamlit 内置 v2 轻量组件，替换原先不带移除按钮的第三方排序组件，不增加运行依赖。选择与排序使用局部 fragment，不重复搜索、不调用 AI、不重建索引。
 - [x] 同一 Slice Case 不重复加入；同名、同页码的跨来源版本和不同页版本可同时选择，显示可读标签且隐藏内部 ID。
 - [x] Confirm order 保存不可变的顺序快照；增加、删除、实际重排都会使旧确认失效。仅切换搜索或标签页不使确认失效。
-- [x] 提供 `export_order_snapshot()` 边界与 Export 页预览；阶段 7 在实际点击导出时捕获该不可变快照并提交后台任务。
+- [x] 提供 `export_order_snapshot()` 边界；导出控件与排序合并在 Selected cases 中，点击导出时捕获不可变快照并提交后台任务。
 - [x] 用户确认阶段 6 测试没有问题，允许进入阶段 7。
 
 验收：勾选、跨页搜索、删除及拖拽后顺序一致；同名多版本可并存；这些交互无网络请求、无解析和索引重建。
@@ -240,59 +239,34 @@
 - [x] 同源与跨源复制原始布局、主题、媒体、图表及关系；公司样本逐页 XML、外链和媒体部件检查通过。
 - [x] 共享快照的重复原始页各自拥有独立 slide / notes part；包含反向关系的专门测试及独立重复页的混合来源样本通过。
 - [x] 不改写 Brief / Creative / Impact，不将索引元数据覆盖到原片。
-- [x] 共用后台 worker，Export 页提供生成、进度完成后的下载及固定文件顺序；保留 Needs Review / AI 提示，不增加审批或水印。
+- [x] 共用后台 worker，在 Selected cases 排序区域后直接提供生成和下载，取消独立 Export 标签页及重复顺序展示；排序变化即时更新确认和生成状态，保留 Needs Review / AI 提示。
 - [x] 有序 Case ID / 原始 Slide ID / 快照哈希 / 引擎版本复用任务和结果；schema 6 增加缓存索引；失败清理临时文件，Clear finished tasks 清理生成文件且保护活动任务和原件。
-- [x] 用户完成阶段 7 手动测试并明确反馈“完美！没有问题！”，允许进入阶段 8。
+- [x] 用户完成阶段 7 手动测试并明确反馈“完美！没有问题！”。
 
 验收：输出页数与选择一致、顺序完全一致；文件可在目标 PowerPoint 中打开和编辑；原文、图像、图表、字体和超链接按样本逐项比对，无修复提示。已知环境字体限制或样本不兼容必须明确记录，不能宣称完全无损。
 
 实现结果：130 项完整离线测试通过，最终任务清理锁调整另行通过 9 项检查；真实 Edge 17 项生成 / 下载 / 复用 / 清理检查通过。公司原页 82、81、65、64、26、19、79、80 导出为约 59 MB 的 8 页原片，约 2.18 秒生成、约 4.1 ms 缓存命中；XML 逐字节一致、外链不变、24 个媒体 / 图表 / 嵌入部件匹配。混合来源四页样本亦通过，含共享快照重复页。schema 6 与升级前备份核对，60 条案例、328 条修改历史和原有来源信息保持不变。用户已确认阶段 7 正常；样本、边界和完整记录见 [STAGE7.md](evaluation/STAGE7.md)。
 
-### 阶段 8 — OneDrive / SharePoint 导入
+### 整体验收与性能收敛（后续）
 
-主要修改：云端来源解析、Microsoft 认证与获取服务、导入 UI；复用阶段 2 的统一入口。
-
-- [x] 核对 Microsoft 官方文档，采用单租户公共桌面应用、MSAL 浏览器交互式登录 / PKCE、Graph `Sites.Read.All` 委托只读权限；不申请读写权限，不接入 `/shares` 或第二套认证流程。
-- [x] 按用户提供的 freud SharePoint 链接确认首版范围：支持公司 OneDrive / SharePoint 完整 PPTX 路径及 `/:p:/r/` 在线编辑链接；校验 HTTPS、准确租户域名与路径，不要求构造下载 URL。不支持短链接或不透明分享码。
-- [x] 通过 Graph 按站点、文档库和文件路径定位，使用当前用户授权获取文件 ID 与读取权限；不直接抓取用户 URL。
-- [x] 下载重定向仅限允许租户和受信 Microsoft 文件域名，限制 4 次跳转、180 秒下载阶段预算及 500 MiB 文件大小；不向下载地址转发 Graph Bearer。
-- [x] 保存文件 ID、eTag、导入地址与快照，下载前后检查版本；复用统一文件验证 / 解析 / 后台补充 / 索引与导出流程。同一云端文件版本及内容重复导入不增加案例，不同版本 / 文件隔离。
-- [x] 令牌仅保存在服务端会话内存，任务只保留授权身份哈希，不保存凭据或签名下载地址；Disconnect 清理凭据，后台后续读取重新检查状态。
-- [x] 映射 8 类标准错误，失败不创建无效案例；Retry 需当前同一账户授权，提交后的补充失败重试仍使用原快照，不悄悄更新到云端新版本。
-- [x] 登录、下载仅由显式操作触发；后台执行且共用有界队列，普通页面重运行 / 选择 / 排序不进行远程检查。登录后保留已粘贴的链接。
-- [x] 161 项完整离线回归通过，含 31 项新增检查：模拟 MSAL、Graph、下载、版本、身份 / 令牌隔离、原片导出以及 AppTest 登录 / 导入 / 断开连接 / 本地切换。
-- [x] 新增导入入口后，真实本机 Edge 的选择 / 拖拽 / × / 原片下载等 17 项回归通过；记录见 `evaluation/stage8_regression.json`，不包含真实 Microsoft 登录。
-- [ ] 配置实际 `MICROSOFT_TENANT_ID`、`MICROSOFT_CLIENT_ID`，核实公司应用注册及同意策略，按 [STAGE8.md](evaluation/STAGE8.md) 验证真实公司账户、无权限文件和有效链接。当前没有真实 Microsoft 登录 / 下载成功记录。
-
-验收：授权本地 / 云端文件进入同一案例与导出流程；云端原件未被修改；认证、权限、失效链接、非 PPTX 和网络故障可区分；导入后即使云端内容变化仍导出原快照。
-
-实现说明与待验证项见 [STAGE8.md](evaluation/STAGE8.md)，公司 IT 所需设置见 [README Microsoft setup](README.md#microsoft-setup)。本阶段不升级数据库 schema，不修改现有公司案例。真实租户验收未完成前，不将阶段 8 或整个 MVP 标记为完全通过。
-
-### 阶段 9 — 整体验收与性能收敛
-
-- [ ] 跑通“本地与云端导入 → 补充 → 审核 → 混合检索 → 同名多版本选择 → 拖拽确认 → 原始导出”完整路径。
+- [ ] 跑通“本地上传 → 补充 → 审核 → 混合检索 → 同名多版本选择 → 拖拽确认 → 原始导出”完整路径。
 - [ ] 补关键行为测试：跨文件身份、迁移、导入原子性、AI 硬约束证据、审核后缓存失效、排序传递、来源快照与导出一致性。
-- [ ] 云端权限使用测试账户验证；AI 质量使用标注样本评估；导出同时做包结构检查和 PowerPoint 人工验收，不仅依赖 mock。
+- [ ] AI 质量使用标注样本评估；导出同时做包结构检查和 PowerPoint 人工验收，不仅依赖 mock。
 - [ ] 按案例库规模和任务并发记录耗时与成本，区分后台总时长、前端响应时长和搜索等待时长。
 - [ ] 建立下节指标基线，再填写目标与验收结论；只优化实际瓶颈，不提前增加大规模系统组件。
 - [ ] 更新 README 的“当前能力”、配置说明、支持范围和已知限制，确保与最终代码一致。
 
-验收：各阶段标准有测试或样本记录，所有 v1.2 功能完成且限制明确；未接通的认证、未通过的保真样本和未测量的性能指标不能标记完成。
+验收：各阶段标准有测试或样本记录，当前确认范围内的功能完成且限制明确；未通过的保真样本和未测量的性能指标不能标记完成。
 
 ## 5. 导入错误与恢复操作
 
-错误代码与英文主提示遵循 v1.2；本地上传复用文件错误分类并调整场景文案。认证问题与网络问题不能统一吞为 Parse Failed。
+本地文件错误分类与安全提示如下，失败时不创建无效案例。
 
 | 错误 | UI 提示 | 恢复入口 |
 | --- | --- | --- |
-| `INVALID_URL` | Please enter a valid OneDrive or SharePoint link. | 修改链接、Local Upload |
-| `UNSUPPORTED_SOURCE` | This source is not supported. Please use OneDrive, SharePoint or local upload. | 更换来源、Local Upload |
-| `AUTH_REQUIRED` | Sign in with Microsoft to access this presentation. | Sign in / Reconnect、Local Upload |
-| `ACCESS_DENIED` | You don't have permission to access this file. | Reconnect（切换有权限账户）、Local Upload |
-| `FILE_NOT_FOUND` | The presentation could not be found. Please check the link. | 修改链接、Local Upload |
-| `INVALID_FILE` | The linked file is not a valid PowerPoint presentation. | 更换文件、Local Upload |
-| `FETCH_FAILED` | Unable to retrieve the file. Please try again. | Retry、Local Upload |
-| `PARSE_FAILED` | The presentation was retrieved but could not be processed. | 更换有效文件、Local Upload；修复可恢复问题后 Retry |
+| `INVALID_FILE` | Please upload a valid .pptx file within the supported size limits. | 选择有效文件 |
+| `FETCH_FAILED` | Unable to read or save the uploaded file. Please try again. | Retry、重新上传 |
+| `PARSE_FAILED` | The uploaded presentation could not be processed. Please check the file and try again. | 修正文件、重新上传 |
 
 不为确定性验证失败执行自动重试；瞬时错误也不无限重试。前端只显示错误码、标准提示和必要的恢复操作，后台诊断日志脱敏。
 
@@ -300,7 +274,7 @@
 
 | 操作 | 允许的计算 / IO | 必须避免 |
 | --- | --- | --- |
-| 导入 | 后台下载、校验、一次解析、短事务写入 | Streamlit 主交互中逐页串行等待远端请求 |
+| 导入 | 后台校验、一次解析、短事务写入 | Streamlit 主交互中逐页串行等待远端请求 |
 | 元数据补充 | 缺失字段处理、URL 缓存、有限批量 AI 请求 | 同一链接重复请求、对已有可靠字段再次推断 |
 | 建索引 | 按变化内容批量更新 Embeddings 与 FTS | 每次搜索或重运行全库重建 |
 | 搜索 | 结构化查询、FTS、一次查询向量、缓存向量检索 | 抓网页、读原始 PPTX、逐结果调用 LLM |
@@ -308,7 +282,7 @@
 | 选择 / 拖拽 | session 中的有序 ID 与必要详情读取 | 重搜、重新嵌入、下载或导出 |
 | 导出 | 显式确认后后台读取快照并生成文件 | 每次重排生成 PPTX、把原片变成截图 |
 
-缓存按用途设置：数据写入增加索引 / 数据版本，使列表和结果缓存失效；元数据文本变化只更新相关向量。使用模型 / 提示版本区分 AI 缓存。认证和任务对象与用户会话绑定，不能通过共享数据缓存泄露用户权限信息。
+缓存按用途设置：数据写入增加索引 / 数据版本，使列表和结果缓存失效；元数据文本变化只更新相关向量。使用模型 / 提示版本区分 AI 缓存。任务归属本地操作人，缓存不保存敏感 API 配置。
 
 ## 7. 评估记录与最终完成标准
 
@@ -317,8 +291,6 @@
 | 指标 | 基线记录方式 |
 | --- | --- |
 | Local Upload Success Rate | 有效 PPTX 成功导入数 / 有效本地测试文件数，附失败原因 |
-| OneDrive / SharePoint Import Success Rate | 分来源统计授权且受支持链接的成功数 / 测试数；认证等负向样本单独统计 |
-| Authentication & Permission Error Handling | 对照登录缺失、授权失效、无权限、失效链接的预期错误与恢复行为 |
 | Source File Integrity | 比对导入内容与快照哈希，核查来源版本、案例关联及原件未修改 |
 | AI Metadata Inference Accuracy | Client / Services 分字段对照人工标注；单列 Unknown、错误推断和来源标记正确性 |
 | Retrieval & Classification Quality | 标注查询的召回与分类正确性；重点检查 Mandatory 条件的错误通过 |
@@ -327,6 +299,6 @@
 | Original PPTX Export Fidelity | PowerPoint 打开与可编辑检查，逐页对照文本、版式、字体、图片、图表、超链接 |
 | Processing Time & API Cost | 分阶段耗时、交互与搜索延迟的 p50 / p95、请求数、模型用量与单次导入 / 查询成本 |
 
-完成意味着：本地与授权云端导入可用；Slice Case 与来源完整可追溯；AI 来源和人工审核清晰；混合检索不误用未验证推断证明硬条件；顺序确认与原始可编辑导出一致；性能在实际样本规模下通过测量后的阈值。
+完成意味着：本地上传可用；Slice Case 与来源完整可追溯；AI 来源和人工审核清晰；混合检索不误用未验证推断证明硬条件；顺序确认与原始可编辑导出一致；性能在实际样本规模下通过测量后的阈值。
 
 实施之外的内容：Multi-Agent、复杂审批链、任意网站抓取、多供应商自动回退、企业级分布式任务与未经验证的全格式 PPTX 兼容。仅当真实样本或部署需求证明必要时再调整范围。

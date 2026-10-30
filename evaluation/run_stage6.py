@@ -124,8 +124,10 @@ with patch("app.config.DB_PATH",Path({str(database)!r})), patch("app.config.get_
                         export_ids = cards.evaluate_all("rows => rows.map(row => row.dataset.caseId)")
                         page.get_by_role("button",name="Confirm order",exact=True).click()
                         expect(page.get_by_text("Order confirmed for 2 slides.",exact=True)).to_be_visible()
-                        page.get_by_role("tab",name="Export",exact=True).click()
-                        expect(page.get_by_text("Confirmed selection: 2 slides.",exact=True)).to_be_visible()
+                        expect(page.get_by_role("tab",name="Export",exact=True)).to_have_count(0)
+                        expect(page.get_by_role("button",name="Generate PPTX",exact=True)).to_be_enabled()
+                        expect(page.get_by_text("Slide order",exact=True)).to_have_count(0)
+                        report["checks"]["ordering_and_export_share_one_tab"] = True
                         report["checks"]["confirmed_order_available_for_phase7"] = True
                         if include_export:
                             from lxml import etree as ET
@@ -184,7 +186,7 @@ with patch("app.config.DB_PATH",Path({str(database)!r})), patch("app.config.get_
                         report["checks"]["empty_selection_clears_all_checkboxes"] = True
                         if include_export:
                             page.get_by_role("button",name="Clear finished tasks",exact=True).click()
-                            page.get_by_role("tab",name="Export",exact=True).click()
+                            page.get_by_role("tab",name="Selected cases",exact=True).click()
                             expect(page.get_by_role("button",name="Generate PPTX",exact=True)).to_be_disabled()
                             expect(page.get_by_role("button",name="Download PPTX",exact=True)).to_have_count(0)
                             report["checks"]["clear_finished_removes_generated_files"] = not list((temporary / "exports").glob("*.pptx"))
