@@ -1,4 +1,5 @@
 from io import BytesIO
+import json
 from pathlib import Path
 from threading import Event
 from unittest.mock import Mock
@@ -117,8 +118,7 @@ def test_ui_imports_two_decks_and_displays_distinct_sources(tmp_path, monkeypatc
     assert not app.multiselect
     assert not app.exception
     assert app.session_state["selected_case_ids"] == tuple(first_pages)
-    next(button for button in app.button if button.label=="Confirm order").click().run()
-    assert app.session_state["confirmed_case_ids"] == tuple(first_pages)
+    assert not any(button.label=="Confirm order" for button in app.button)
     assert not next(button for button in app.button if button.label=="Generate PPTX").disabled
     assert all(item.label!="Export" for item in app.tabs)
     tab(app,"Search results")
@@ -333,7 +333,7 @@ def test_ui_auto_confirms_ai_and_has_a_compact_unpaginated_editor(tmp_path, monk
     assert not app.exception and get_case(db,case_id)["review_status"] == "NEEDS_REVIEW"
 
 
-def test_ui_uses_one_free_text_form_and_reuses_results_for_local_interactions(tmp_path,monkeypatch):
+def test_ui_uses_one_free_text_form_and_reuses_results_for_local_interactions(tmp_path,monkeypatch,deck_variant):
     from app.search.hybrid_search import SearchResults
     from app.search.intent import SearchIntent
     root = Path(__file__).resolve().parents[1]
@@ -341,10 +341,14 @@ def test_ui_uses_one_free_text_form_and_reuses_results_for_local_interactions(tm
     monkeypatch.setattr("app.config.DB_PATH",db)
     monkeypatch.setattr("streamlit.file_uploader",lambda *args,**kwargs:[])
     monkeypatch.setattr("app.services.ingest_service.fetch_case_page",lambda url,**kwargs:{})
-    ingest_deck(root / "evaluation/fixtures/source_a.pptx",db)
-    rows = list_cases(db)
+    fixture=root / "evaluation/fixtures/source_a.pptx"
+    for number in range(7):
+        ingest_deck(deck_variant(fixture,f"bulk-{number}.pptx"),db)
+    all_cases = list_cases(db)
+    previous_case=all_cases[-1]["case_id"]
+    rows = all_cases[:12]
     for index,row in enumerate(rows):
-        row.update(match_level="High Match" if index==0 else "Partial Match",match_reason="Original evidence explains the decision.",
+        row.update(match_level="High Match" if index<11 else "Partial Match",match_reason="Original evidence explains the decision.",
                    evidence=[{"source":"Original slide","quote":"Synthetic test brief."}],uncertainties=[])
     rows.append(dict(rows[0],case_id="rejected-case",title="REJECTED CASE MUST BE HIDDEN",match_level="Not a Match"))
     parsed = SearchIntent(summary="Find the requested film",keywords=["film"],mandatory=[],preferred=[],excluded=[],unresolved_mandatory=[])
@@ -358,18 +362,36 @@ def test_ui_uses_one_free_text_form_and_reuses_results_for_local_interactions(tm
     assert any("High Match" in item.value for item in app.markdown)
     assert not any(item.label=="Not a Match" for item in app.tabs)
     assert not any(item.value=="REJECTED CASE MUST BE HIDDEN" for item in app.subheader)
+    high=next(item for item in app.expander if item.label=="High Match (11)")
+    assert high.proto.expanded is True
     partial = next(item for item in app.expander if item.label=="Partial Match (1)")
     assert partial.proto.expanded is False
-    assert any(item.value==rows[1]["title"] for item in partial.subheader)
+    assert any(item.value==rows[11]["title"] for item in partial.subheader)
     assert not any(item.label=="Search readiness" for item in app.expander)
     assert any(item.value=="Synthetic test brief." for item in app.text)
     assert not any("similarity" in item.value.lower() for item in app.caption)
     app.run()
     assert not app.exception and search.call_count==1
     assert any(item["match_level"]=="Not a Match" for item in app.session_state["search_results"])
+    app.session_state["selected_case_ids"]=(previous_case,)
+    app.run()
+    app.checkbox(key=f"case-select:{rows[11]['case_id']}").check().run()
+    next(button for button in app.button if button.label=="Select all High Match").click().run()
+    expected=(previous_case,rows[11]["case_id"],*(case["case_id"] for case in rows[:11]))
+    assert app.session_state["selected_case_ids"]==expected
+    next(button for button in app.button if button.label=="Select all High Match").click().run()
+    assert app.session_state["selected_case_ids"]==expected
+    app.number_input(key="match_page").set_value(2).run()
+    assert app.checkbox(key=f"case-select:{rows[10]['case_id']}").value
+    next(button for button in app.button if button.label=="Clear all selections").click().run()
+    assert app.session_state["selected_case_ids"]==()
+    assert all(not field.value for field in app.checkbox if field.label=="Select case")
+    app.number_input(key="match_page").set_value(1).run()
+    assert all(not field.value for field in app.checkbox if field.label=="Select case")
+    assert not app.exception and search.call_count==1
 
 
-def test_ui_export_requires_confirmation_reuses_task_and_defers_file_reads(tmp_path,monkeypatch):
+def test_ui_generate_confirms_order_reuses_task_and_defers_file_reads(tmp_path,monkeypatch):
     root = Path(__file__).resolve().parents[1]
     db = tmp_path / "cases.sqlite3"
     monkeypatch.setattr("app.config.DB_PATH",db)
@@ -382,14 +404,16 @@ def test_ui_export_requires_confirmation_reuses_task_and_defers_file_reads(tmp_p
     app = AppTest.from_file(str(root / "app/ui/streamlit_app.py")).run(timeout=30)
     app.session_state["selected_case_ids"] = ids
     tab(app,"Selected cases")
-    assert next(button for button in app.button if button.label=="Generate PPTX").disabled
-    assert all(item.label!="Export" for item in app.tabs)
-    next(button for button in app.button if button.label=="Confirm order").click().run()
     assert not next(button for button in app.button if button.label=="Generate PPTX").disabled
+    assert all(item.label!="Export" for item in app.tabs)
+    assert not any(button.label=="Confirm order" for button in app.button)
+    assert not any(item.value=="Export PPTX" for item in app.subheader)
     assert not any(item.label=="Slide order" for item in app.expander)
     next(button for button in app.button if button.label=="Generate PPTX").click().run()
     manager = get_task_manager(db)
     task_id = app.session_state["last_export_task_id"]
+    assert app.session_state["confirmed_case_ids"]==ids
+    assert tuple(json.loads(manager.get_task(task_id)["payload_json"])["case_ids"])==ids
     assert manager.wait(task_id)["status"]=="SUCCEEDED"
     list_tasks=manager.list_tasks
     calls=0
@@ -414,7 +438,7 @@ def test_ui_export_requires_confirmation_reuses_task_and_defers_file_reads(tmp_p
     assert len(app.get("download_button"))==1
     assert any("Your current selection is different" in item.value for item in app.info)
     assert any(item.label=="Slides in this file" for item in app.expander)
-    assert next(button for button in app.button if button.label=="Generate PPTX").disabled
+    assert not next(button for button in app.button if button.label=="Generate PPTX").disabled
     app.session_state["active_tab"] = "Export"
     app.run()
     assert not app.exception and app.session_state["active_tab"]=="Selected cases"

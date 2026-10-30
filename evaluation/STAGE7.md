@@ -4,12 +4,14 @@
 
 ## 使用方式
 
-1. 在搜索结果选择案例，在 Selected cases 拖拽排序，然后点击 Confirm order。
-2. 在同一个 Selected cases 标签页下方的 Export PPTX 区域点击 Generate PPTX。
+1. 在搜索结果选择案例，可用 Select all High Match 批量选择；在 Selected cases 拖拽排序。
+2. 点击列表上方 Generate PPTX，这次点击直接确认并捕获当前顺序，没有单独 Confirm order 或 Export 分区。
 3. 等待后台任务完成，点击 Download PPTX 下载。生成时仍可搜索、查看或修改元数据。
-4. 添加、删除或重排后先重新确认，再生成新文件。旧下载固定使用原生成顺序；如果当前选择不同，界面会明确提示，并可展开 Slides in this file 核对旧文件内容。
+4. 添加、删除或重排后直接再次生成。旧下载固定使用原生成顺序；如果当前选择不同，界面会明确提示，并可展开 Slides in this file 核对旧文件内容。
 
 Needs Review 和含未验证 AI 元数据的案例仍可导出，界面保留提示，不增加人工审批步骤，不修改原片或添加水印。索引中的人工元数据修改不会写入原始幻灯片。
+
+最新操作更新（2026-10-30）：Generate PPTX / Download PPTX 并排放在列表上方，未生成时下载禁用；点击生成直接确认并捕获当前顺序，移除 Confirm order 和 Export 分区。139 项完整离线回归、22 项真实 Edge 合成流程检查通过，覆盖无需预先确认的导出、重排后直接生成、原片内容与顺序、文件复用和清理。最新记录：[selection_shortcuts_browser.json](selection_shortcuts_browser.json)，[当前截图](selection_shortcuts_browser.png)。以下合并过程与阶段 7 首次验收数据保留为历史记录。
 
 2026-10-30 界面更新：排序、确认和导出合并在 Selected cases 中，共用同一局部刷新区域。移除独立 Export 标签页、重复的 Slide order / 确认计数及跳转按钮；仅当前选择不同于已有文件时保留 Slides in this file，方便辨别旧下载。
 
@@ -61,7 +63,7 @@ schema 5 → 6 增加 `tasks.cache_key` 及复用查询索引；没有增加审�
 1. 重启 Demo，搜索并选择不同案例版本，调整顺序并确认。
 2. Generate PPTX → Download PPTX，核对输出页数和顺序；可先打开上面的两份样本。
 3. 在本机 PowerPoint 打开，检查无修复提示；逐项核对文字、布局、字体、图片、图表、超链接及可编辑性。
-4. 连续生成相同选择，确认复用成功结果；增删 / 重排后重新确认，验证新文件对应新顺序。
+4. 连续生成相同选择，确认复用成功结果；增删 / 重排后再次生成，验证新文件对应新顺序。
 5. Clear finished tasks 后生成文件应被清理；原始快照及案例仍保留，之后可以重新生成。
 
 已知限制沿用选定引擎：不混合不同幻灯片尺寸；多个来源含嵌入字体的组合尚未验证；内部跳转目的页必须一起选入。实际机器缺字体时的显示差异需在 PowerPoint 中核对。

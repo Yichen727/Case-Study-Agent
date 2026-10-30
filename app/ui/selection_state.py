@@ -21,6 +21,15 @@ def select_case(state, case_id, selected):
         remove_cases(state,[case_id])
 
 
+def select_cases(state, case_ids):
+    """Append a batch once, retaining existing choices and their custom order."""
+    _store(state,dict.fromkeys((*selected_ids(state),*case_ids)))
+
+
+def clear_selection(state):
+    _store(state,())
+
+
 def remove_cases(state, case_ids):
     removed = set(case_ids)
     _store(state,(case_id for case_id in selected_ids(state) if case_id not in removed))
@@ -34,17 +43,10 @@ def reorder_cases(state, order):
     _store(state,order)
 
 
-def confirm_order(state):
+def export_order_snapshot(state):
+    """A Generate click confirms and captures the current order exactly once."""
     current = selected_ids(state)
     if not current:
-        raise ValueError("Select at least one case before confirming the order.")
+        raise ValueError("Select at least one case before generating a presentation.")
     state["confirmed_case_ids"] = current
-
-
-def export_order_snapshot(state):
-    """Phase 7 captures this immutable order when submitting an export task."""
-    current = selected_ids(state)
-    confirmed = state.get("confirmed_case_ids")
-    if not current or confirmed is None or tuple(confirmed)!=current:
-        raise ValueError("Confirm the current selection and order before exporting.")
-    return tuple(confirmed)
+    return current

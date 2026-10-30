@@ -10,6 +10,8 @@
 
 搜索交互最新确认（2026-10-29）：只保留一个自由文本输入框，由 AI 识别必须条件、偏好和排除项。此决定取代此前“自由文本＋可选 Must-have 筛选”的方案；同一请求缓存解析与查询向量，避免重复调用。
 
+搜索稳定性修复（2026-10-30）：摘要及解释统一英语，常见 case / cases 包装共用解析与向量缓存，修复 AI-made 同义词覆盖原文证据的问题；所有必须条件均有直接证据时不再被低相似度降级，仍严格保留排除项与未知硬条件。138 项离线回归及 8 条真实查询变体验证通过，详见 [SEARCH_STABILITY.md](evaluation/SEARCH_STABILITY.md)。
+
 重复上传修订（2026-10-29）：本地同内容 PPTX 重复上传应保持案例数量不变，不能每次新增来源副本。已完成按文件 SHA-256 复用导入、保护人工修改；原库已备份并将 240 条重复案例归并为 60 条，328 条修改历史及 4 次 AI 处理记录保留。120 项离线测试通过，细节见 [重复上传修复](evaluation/DUPLICATE_IMPORTS.md)。
 
 ## 1. 目标与开发约束
@@ -201,7 +203,7 @@
 - [x] 候选按 `case_id` 去除重复召回，同名页、跨来源相同页码、链接版本及延续页保持独立。
 - [x] 明确违反硬条件判为 Not a Match；原文无证据、解析未确认或仅未验证 AI 支持时不能进入 High Match。可选偏好不充当硬条件。
 - [x] High Match 要求主题相关、所有已识别硬条件有可靠证据；Partial Match 解释证据缺口或较弱相关性；Not a Match 解释冲突或低相关性。
-- [x] 展示等级、理由、原文摘录、来源、页码、Link Type、Review Status 和不确定项，隐藏内部 ID 与数值相似度；按用户测试反馈，High Match 直接展示，Partial Match 默认折叠，Not a Match 不展示。移除 Search readiness 侧栏，准备失败时在任务中提供重试。
+- [x] 展示等级、理由、原文摘录、来源、页码、Link Type、Review Status 和不确定项，隐藏内部 ID 与数值相似度；High Match 折叠栏默认展开，Partial Match 默认折叠，Not a Match 不展示。移除 Search readiness 侧栏，准备失败时在任务中提供重试。
 - [x] Needs Review / Confirmed 均可参与；不可用的语义服务或条件解析明确提示 Keyword-only / 未确认，保留本地检索。
 - [x] 从公司 60 张案例整理五个长 prompt，完成真实调用、冷缓存测量、界面重运行检查及最终代码对两组已保存解析的离线复验。
 - [x] 用户反馈搜索测试效果非常好；按反馈完成结果与侧栏简化。[五个 Prompt](evaluation/STAGE5_PROMPTS.md) 保留供后续回归。
@@ -219,7 +221,9 @@
 - [x] Selected cases 单独标签页显示案例名、来源、页码、状态；拖拽排序，每条案例右上角 × 直接移除，取消独立 Remove cases 栏目；搜索卡片取消勾选同步移除。
 - [x] 排序与单条移除共用一个 Streamlit 内置 v2 轻量组件，替换原先不带移除按钮的第三方排序组件，不增加运行依赖。选择与排序使用局部 fragment，不重复搜索、不调用 AI、不重建索引。
 - [x] 同一 Slice Case 不重复加入；同名、同页码的跨来源版本和不同页版本可同时选择，显示可读标签且隐藏内部 ID。
-- [x] Confirm order 保存不可变的顺序快照；增加、删除、实际重排都会使旧确认失效。仅切换搜索或标签页不使确认失效。
+- [x] Generate PPTX 点击时直接确认并保存不可变顺序快照，取消单独 Confirm order；增删 / 重排后下一次生成使用新顺序，旧任务与文件保持原顺序。
+- [x] 搜索结果提供 Select all High Match（覆盖本次搜索所有结果页，追加并保留原选择）和 Clear all selections（清空跨搜索选择并同步勾选），不重搜或调用 AI。
+- [x] 快捷操作与一键生成通过 139 项完整离线回归、22 项真实 Edge 合成流程检查，覆盖分页选择、折叠、勾选同步、拖拽后直接生成及原片顺序核对，记录见 `evaluation/selection_shortcuts_browser.json`。
 - [x] 提供 `export_order_snapshot()` 边界；导出控件与排序合并在 Selected cases 中，点击导出时捕获不可变快照并提交后台任务。
 - [x] 用户确认阶段 6 测试没有问题，允许进入阶段 7。
 
@@ -239,7 +243,7 @@
 - [x] 同源与跨源复制原始布局、主题、媒体、图表及关系；公司样本逐页 XML、外链和媒体部件检查通过。
 - [x] 共享快照的重复原始页各自拥有独立 slide / notes part；包含反向关系的专门测试及独立重复页的混合来源样本通过。
 - [x] 不改写 Brief / Creative / Impact，不将索引元数据覆盖到原片。
-- [x] 共用后台 worker，在 Selected cases 排序区域后直接提供生成和下载，取消独立 Export 标签页及重复顺序展示；排序变化即时更新确认和生成状态，保留 Needs Review / AI 提示。
+- [x] 共用后台 worker，在 Selected cases 列表顶部并排提供生成 / 下载，取消独立 Export 标签页、Export 分区、Confirm order 和重复顺序展示；保留旧文件差异及 Needs Review / AI 提示。
 - [x] 有序 Case ID / 原始 Slide ID / 快照哈希 / 引擎版本复用任务和结果；schema 6 增加缓存索引；失败清理临时文件，Clear finished tasks 清理生成文件且保护活动任务和原件。
 - [x] 用户完成阶段 7 手动测试并明确反馈“完美！没有问题！”。
 

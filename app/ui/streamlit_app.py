@@ -14,12 +14,13 @@ from app.db.repository import (
 from app.ingestion.errors import IngestionError
 from app.models import case_display_status
 from app.search.keyword_search import search_cases
+from app.search.intent import PARSER_VERSION
 from app.services.source_service import remove_unused_snapshots, unused_snapshots
 from app.services.task_service import get_task_manager, TaskQueueFull
 from app.ui.review_panel import render_review
 from app.search.embedding_service import index_status
 from app.ui.selection_panel import render_selected_cases
-from app.ui.selection_state import select_case, selected_ids
+from app.ui.selection_state import clear_selection, select_case, select_cases, selected_ids
 from app.export.slide_export import export_error_message
 
 PAGE_SIZE = 25
@@ -41,6 +42,9 @@ current_version = data_version(DB_PATH)
 if st.session_state.get("data_version") != current_version:
     st.session_state.pop("search_results", None)
     st.session_state["data_version"] = current_version
+if st.session_state.get("search_parser_version") != PARSER_VERSION:
+    st.session_state.pop("search_results", None)
+    st.session_state["search_parser_version"] = PARSER_VERSION
 
 manager = get_task_manager(DB_PATH)
 # The library belongs to the local Windows operator.
@@ -267,10 +271,6 @@ tab_search, tab_all, tab_metadata, tab_selected = st.tabs(
 
 @st.fragment
 def render_search_results():
-    chosen = selected_ids(st.session_state)
-    if st.button(f"Selected cases ({len(chosen)})",key="selected-cases-nav",
-                 disabled=not chosen,on_click=focus_selection_tab):
-        st.rerun()
     request = st.session_state.get("search_request")
     if request and "search_results" not in st.session_state:
         try:
@@ -279,6 +279,19 @@ def render_search_results():
         except ValueError as exc:
             st.error(str(exc))
     results = st.session_state.get("search_results", [])
+    high_matches = [item for item in results if item.get("match_level")=="High Match"]
+    partial_matches = [item for item in results if item.get("match_level")=="Partial Match"]
+    chosen = selected_ids(st.session_state)
+    select_high, clear_all, selected_nav = st.columns(3)
+    with select_high:
+        st.button("Select all High Match",disabled=not high_matches,
+                  on_click=select_cases,args=(st.session_state,[item["case_id"] for item in high_matches]))
+    with clear_all:
+        st.button("Clear all selections",disabled=not chosen,on_click=clear_selection,args=(st.session_state,))
+    with selected_nav:
+        if st.button(f"Selected cases ({len(chosen)})",key="selected-cases-nav",
+                     disabled=not chosen,on_click=focus_selection_tab):
+            st.rerun()
     if not request:
         st.info("Upload a presentation, then enter a query and click Search.")
     elif not results:
@@ -288,11 +301,11 @@ def render_search_results():
             st.info(notice)
         if intent := getattr(results,"intent",None):
             st.write("**Your brief:** " + intent["summary"])
-        high_matches = [item for item in results if item.get("match_level")=="High Match"]
-        partial_matches = [item for item in results if item.get("match_level")=="Partial Match"]
-        offset = page_offset("match_page",len(high_matches),10,"High Match page") if len(high_matches)>10 else 0
-        for item in high_matches[offset:offset+10]:
-            show_case(item)
+        if high_matches:
+            with st.expander(f"High Match ({len(high_matches)})",expanded=True):
+                offset = page_offset("match_page",len(high_matches),10,"High Match page") if len(high_matches)>10 else 0
+                for item in high_matches[offset:offset+10]:
+                    show_case(item)
         if not high_matches and partial_matches:
             st.info("No High Match cases. Expand Partial Match to view related cases and evidence gaps.")
         elif results and not high_matches:

@@ -191,6 +191,85 @@ def test_dubbing_requirement_does_not_accept_any_generic_ai_film(corpus):
     assert check_requirement(row,metadata,requirement("ai_production",["Adobe Firefly"]))["status"] == "UNKNOWN"
 
 
+@pytest.mark.parametrize("terms",[
+    ["generative AI","AI-generated","AI-made"],
+    ["AI-made content"],
+    ["AI-created content"],
+    ["AI generation"],
+])
+def test_generic_ai_synonyms_do_not_hide_original_production_evidence(corpus,terms):
+    db,_,ids=corpus
+    req=requirement("ai_production",terms)
+    row,metadata=evidence_case(db,ids["HOTEL FILM"])
+    # Related wording must not override direct evidence, even with weak vectors.
+    result=classify(row,metadata,intent(req),0.2,0.1,terms)
+    assert result["match_level"]=="High Match"
+    assert result["condition_checks"][0]["quote"]=="Every scene was generated using AI."
+    row,metadata=evidence_case(db,ids["AI PRODUCT"])
+    assert check_requirement(row,metadata,req)["status"]=="UNKNOWN"
+    row,metadata=evidence_case(db,ids["LIVE ACTION"])
+    assert check_requirement(row,metadata,req)["status"]=="NOT_MET"
+
+
+def test_direct_evidence_does_not_bypass_missing_extra_mandatory_or_exclusion(corpus):
+    db,_,ids=corpus
+    row,metadata=evidence_case(db,ids["HOTEL FILM"])
+    ai=requirement("ai_production",["AI-made"])
+    parsed=intent(ai,requirement("ai_production",["dubbing"]))
+    assert classify(row,metadata,parsed,0.2,0.1,["AI"])["match_level"]=="Partial Match"
+    parsed=intent(ai,excluded=[requirement("content",["hospitality"])])
+    assert classify(row,metadata,parsed,0.2,0.1,["AI"])["match_level"]=="Not a Match"
+
+
+def test_case_cases_punctuation_and_ai_hyphen_share_interpretation_and_vector(corpus,models):
+    db,_,ids=corpus
+    embed,parse=models
+    vectors.build_index(db)
+    parsed=intent(requirement("ai_production"))
+    parsed.summary="Cases featuring AI-generated content."
+    parsed.keywords=["generative AI","AI-generated content"]
+    parsed.mandatory[0].request_quote="ai generated content"
+    parse.responses.parse.return_value.output_parsed=parsed
+    variants=["Show me the cases about AI generated content!",
+              "Show me the case about AI generated content!",
+              "Show me cases about AI-Generated content",
+              "Find case studies about AI generated content.",
+              "AI generated content"]
+    results=[search.search_cases(db,query,100) for query in variants]
+    assert all(interpretation.normalize_query(query)=="ai generated content" for query in variants)
+    assert all([(case["case_id"],case["match_level"]) for case in result]==
+               [(case["case_id"],case["match_level"]) for case in results[0]] for result in results)
+    assert next(case for case in results[0] if case["case_id"]==ids["HOTEL FILM"])["match_level"]=="High Match"
+    assert all(result.intent["summary"]=="Cases featuring AI-generated content." for result in results)
+    assert all(result.intent_cache_hit and result.query_cache_hit for result in results[1:])
+    assert parse.responses.parse.call_count==1 and embed.embeddings.create.call_count==2
+
+
+def test_query_normalization_preserves_must_haves_exclusions_and_numbers():
+    query="Show me the cases about AI content. Must use lip-sync, exclude NHS and exceed 2 million views!"
+    normalized=interpretation.normalize_query(query)
+    assert normalized=="ai content. must use lip-sync, exclude nhs and exceed 2 million views"
+    assert interpretation.normalize_query("Show me one case about AI content")!="ai content"
+    assert interpretation.normalize_query(query.replace("2 million","3 million"))!=normalized
+
+
+def test_old_non_english_intent_cache_is_not_reused_after_parser_policy_change(corpus,models):
+    from app.config import get_ai_settings
+    db,_,_=corpus
+    _,parse=models
+    query="Show me the cases about AI generated content!"
+    key=hashlib.sha256(("search-intent-v4\n"+get_ai_settings().model+"\n"+query.casefold()).encode()).hexdigest()
+    stale=intent()
+    stale.summary="Casos sobre contenido generado con IA."
+    with connect(db) as conn:
+        conn.execute("INSERT INTO query_intent_cache(cache_key,payload_json) VALUES (?,?)",(key,stale.model_dump_json()))
+    fresh,hit=interpretation.interpret_query(db,query)
+    assert not hit and fresh.summary=="Find the requested production work"
+    assert parse.responses.parse.call_count==1
+    instructions=parse.responses.parse.call_args.kwargs["instructions"]
+    assert "ALWAYS write summary" in instructions and "in ENGLISH" in instructions
+
+
 def test_unknown_hard_condition_blocks_high_and_missing_metadata_remains_searchable(corpus):
     db,_,ids = corpus
     row,metadata = evidence_case(db,ids["HOTEL FILM"])

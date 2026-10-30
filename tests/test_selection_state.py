@@ -1,7 +1,7 @@
 import pytest
 
 from app.ui.selection_state import (
-    confirm_order, export_order_snapshot, remove_cases, reorder_cases, select_case, selected_ids,
+    clear_selection, export_order_snapshot, remove_cases, reorder_cases, select_case, select_cases, selected_ids,
 )
 from app.ui.selection_panel import selection_labels
 
@@ -19,17 +19,12 @@ def test_ordered_independent_slides_confirmation_and_export_snapshot():
     for case_id in ("source-a:256","source-b:256","source-a:257","source-a:256"):
         select_case(state,case_id,True)
     assert selected_ids(state) == ("source-a:256","source-b:256","source-a:257")
-    with pytest.raises(ValueError,match="Confirm"):
-        export_order_snapshot(state)
-    confirm_order(state)
     snapshot = export_order_snapshot(state)
     select_case(state,"source-a:256",True)
     assert export_order_snapshot(state) == snapshot  # A no-op does not invalidate confirmation.
     reorder_cases(state,reversed(snapshot))
     assert state["confirmed_case_ids"] is None
-    with pytest.raises(ValueError,match="Confirm"):
-        export_order_snapshot(state)
-    confirm_order(state)
+    assert export_order_snapshot(state)==tuple(reversed(snapshot))
     remove_cases(state,["source-b:256"])
     assert state["confirmed_case_ids"] is None
     assert selected_ids(state)==("source-a:257","source-a:256")
@@ -37,7 +32,7 @@ def test_ordered_independent_slides_confirmation_and_export_snapshot():
     select_case(state,"source-b:256",True)
     assert selected_ids(state)[-1]=="source-b:256"
     select_case(state,"source-a:256",False)
-    confirm_order(state)
+    export_order_snapshot(state)
     select_case(state,"source-c:256",True)
     assert state["confirmed_case_ids"] is None
 
@@ -52,4 +47,19 @@ def test_invalid_drag_payload_cannot_drop_or_duplicate_cases():
         assert selected_ids(state)==("a","b")
     remove_cases(state,["a","b"])
     with pytest.raises(ValueError):
-        confirm_order(state)
+        export_order_snapshot(state)
+
+
+def test_batch_selection_preserves_custom_order_adds_once_and_clears_every_search():
+    state={}
+    select_cases(state,["partial:1","previous-search:1"])
+    snapshot=export_order_snapshot(state)
+    revision=state["selection_revision"]
+    select_cases(state,["high:1","high:2","high:1"])
+    assert selected_ids(state)==("partial:1","previous-search:1","high:1","high:2")
+    assert state["selection_revision"]==revision+1 and state["confirmed_case_ids"] is None
+    select_cases(state,["high:1","high:2"])
+    assert state["selection_revision"]==revision+1
+    clear_selection(state)
+    assert selected_ids(state)==() and state["confirmed_case_ids"] is None
+    assert snapshot==("partial:1","previous-search:1")

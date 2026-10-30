@@ -1,11 +1,11 @@
-"""Selected case ordering; drag/remove/confirm rerun only this local fragment."""
+"""Selected case ordering and export actions share one local fragment."""
 import hashlib
 
 import streamlit as st
 
 from app.db.repository import case_options_by_ids
 from app.ui.selection_state import (
-    confirm_order, export_order_snapshot, remove_cases, reorder_cases, selected_ids,
+    remove_cases, reorder_cases, selected_ids,
 )
 from app.ui.selected_case_list import selected_case_list
 from app.ui.export_panel import render_export_panel
@@ -25,26 +25,19 @@ def selection_labels(cases):
 
 @st.fragment
 def render_selected_cases(db_path, manager, owner):
-    cases = render_order(db_path)
-    st.divider()
-    render_export_panel(db_path,manager,owner,cases)
-
-
-def render_order(db_path):
     st.subheader("Selected cases")
     ids = selected_ids(st.session_state)
-    if not ids:
-        st.info("Choose cases using the checkboxes in Search results.")
-        return []
-    cases = case_options_by_ids(db_path,list(ids))
+    cases = case_options_by_ids(db_path,list(ids)) if ids else []
     names = selection_labels(cases)
     if any(case_id not in names for case_id in ids):
         remove_cases(st.session_state,[case_id for case_id in ids if case_id not in names])
         st.warning("Cases no longer in the library were removed from the selection.")
         ids = selected_ids(st.session_state)
-        if not ids:
-            return []
-    st.caption(f"{len(ids)} cases selected. Drag to set the final slide order.")
+    render_export_panel(db_path,manager,owner,cases)
+    if not ids:
+        st.info("Choose cases using the checkboxes in Search results.")
+        return
+    st.caption(f"{len(ids)} cases selected. Drag to reorder; Generate PPTX confirms and exports this order.")
     items = [names[case_id] for case_id in ids]
     # Reset the component after membership, order, or displayed metadata changes.
     fingerprint = hashlib.sha256("\n".join(items).encode()).hexdigest()[:12]
@@ -59,11 +52,3 @@ def render_order(db_path):
         elif action["type"] == "reorder":
             reorder_cases(st.session_state,action["case_ids"])
         st.rerun(scope="fragment")
-
-    st.button("Confirm order",type="primary",on_click=confirm_order,args=(st.session_state,))
-    if st.session_state.get("confirmed_case_ids") is not None:
-        snapshot = export_order_snapshot(st.session_state)
-        st.success(f"Order confirmed for {len(snapshot)} slides.")
-    else:
-        st.caption("Confirm the order when ready. Adding, removing or reordering cases requires a new confirmation.")
-    return cases

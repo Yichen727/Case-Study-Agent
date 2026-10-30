@@ -7,8 +7,12 @@
 1. 正常搜索，在 High Match 或展开的 Partial Match 卡片上勾选 Select case。超过 10 条的结果支持分页；换页、换搜索、换标签页不清空选择。
 2. 点击 Selected cases 标签页，或搜索结果上方的 Selected cases 计数按钮。列表显示案例名称、来源文件、页码及 Confirmed / Needs Review，内部 ID 不展示。
 3. 上下拖动列表设置顺序。需要移除时，点击该案例右上角 ×；不再单独选择 Remove cases。回到搜索卡片取消勾选也能移除。
-4. 点击 Confirm order，看到 Order confirmed。随后增删或重排会取消确认，需重新确认；切换搜索不取消已确认顺序。
-5. 阶段 7 已接通原片导出；2026-10-30 起控件合并在 Selected cases 排序区域下方，确认后可直接生成和下载，无需切换标签页。
+4. 列表顶部的 Generate PPTX 点击时直接确认当前顺序并后台生成，取消 Confirm order；增删或重排后再次 Generate 即采用新顺序。
+5. Download PPTX 与生成按钮并排，文件准备好后可下载；不再另设 Export 区域或标签页。
+
+2026-10-30 快捷操作更新：High Match 折叠栏默认展开；Select all High Match 覆盖本次搜索所有结果页，保留手选 Partial Match 和其他搜索选择；Clear all selections 清空全部选择并同步可见 / 离页勾选。批量操作不重新执行检索或 AI。
+
+当前验证：139 项完整离线回归通过（34.60 秒），其中 19 项选择 / 界面 / 导出定向检查亦单独通过。AppTest 覆盖 11 个 High Match 跨两页全选，并保留 Partial Match 与之前搜索的选择；清空后两个结果页勾选均取消，搜索函数未额外执行。真实 Edge 的 22 项检查通过，见 [selection_shortcuts_browser.json](selection_shortcuts_browser.json) 与[当前界面](selection_shortcuts_browser.png)。真实浏览器采用合成 PPTX 及固定 High / Partial 等级测试界面，不用于评估检索质量，也没有调用 AI。
 
 同一 Slice Case 不会重复加入；相同 Case Name 的不同页、相同页码的不同来源可以同时加入。完全相同的显示标签用 copy 序号区分，排序不依赖显示名称。
 
@@ -63,6 +67,6 @@ python -B -m evaluation.run_stage6
 
 1. 重启 Demo，使用已有五个 prompt 中任意一个，勾选几个案例，包括同名的不同页版本。
 2. 换一个 prompt 再选案例，确认之前的选择仍在；结果超过一页时，换页再回来查看勾选状态。
-3. 打开 Selected cases，将末项拖到首项，点击 Confirm order。
+3. 打开 Selected cases，将末项拖到首项，点击顶部 Generate PPTX 直接确认并生成。
 4. 点击某条案例右上角 ×，确认旧确认消失、其余顺序保留；回搜索结果确认对应 Checkbox 未勾选。
-5. 重新确认，在同页下方生成并下载，核对文件顺序与当前确认顺序一致。
+5. 再次 Generate 并下载，核对文件顺序与点击生成时的顺序一致。

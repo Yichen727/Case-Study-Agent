@@ -5,7 +5,7 @@ import re
 from app.db.repository import CASE_SELECT, connect
 from app.search.classification import classify, contains
 from app.search.embedding_service import SearchServiceError, index_status, query_vector, semantic_scores
-from app.search.intent import interpret_query, MAX_QUERY_BYTES
+from app.search.intent import interpret_query, normalize_query, MAX_QUERY_BYTES
 
 STOPWORDS = set("a an the and or of to for in on with from by as at is are be been this that these those it its their our we i me my us find show looking need want case cases study studies example examples content work project projects please would should must include including have has also only can could do not rather than which when where how such all both each more most some any into across through using used use relevant original material evidence match matches result results".split())
 
@@ -50,6 +50,9 @@ def search_cases(db_path, query, limit=10):
         return SearchResults()
     if len(query.encode("utf-8"))>MAX_QUERY_BYTES:
         raise ValueError("Please shorten the search request to within 6,000 UTF-8 bytes.")
+    query = normalize_query(query)
+    if not query:
+        return SearchResults()
     readiness = index_status(db_path)
     if not readiness["total"]:
         return SearchResults(notices=["Import a presentation before searching."],index=readiness)

@@ -40,7 +40,11 @@ from app.config import AISettings
 from app.search.keyword_search import search_cases
 def observed_search(*args,**kwargs):
     with Path({str(events)!r}).open("a") as log: log.write("search\\n")
-    return search_cases(*args,**kwargs)
+    results = search_cases(*args,**kwargs)
+    if args[1]=="synthetic":
+        for index,case in enumerate(results):
+            case["match_level"] = "High Match" if index<2 else "Partial Match"
+    return results
 with patch("app.config.DB_PATH",Path({str(database)!r})), patch("app.config.get_ai_settings",return_value=AISettings()), patch("app.search.keyword_search.search_cases",side_effect=observed_search), patch("app.search.intent.OpenAI",side_effect=AssertionError("Unexpected OpenAI call")), patch("app.search.embedding_service.OpenAI",side_effect=AssertionError("Unexpected embedding call")):
     runpy.run_path({str(root / "app/ui/streamlit_app.py")!r},run_name="__main__")
 ''',encoding="utf-8")
@@ -71,9 +75,28 @@ with patch("app.config.DB_PATH",Path({str(database)!r})), patch("app.config.get_
                         page.goto(f"http://127.0.0.1:{port}")
                         page.get_by_role("textbox",name="Search cases",exact=True).fill("synthetic")
                         page.get_by_role("button",name="Search",exact=True).click()
-                        page.get_by_text("Partial Match (3)",exact=True).click()
+                        high=page.get_by_text("High Match (2)",exact=True)
+                        high_details=page.get_by_test_id("stExpander").filter(has=high).locator("details").first
+                        expect(high_details).to_have_attribute("open","")
+                        high.click()
+                        expect(high_details).not_to_have_attribute("open","")
+                        high.click()
+                        expect(high_details).to_have_attribute("open","")
+                        report["checks"]["high_match_defaults_open_and_can_collapse"] = True
+                        partial=page.get_by_text("Partial Match (1)",exact=True)
+                        assert not partial.evaluate("node => node.closest('details').open")
+                        partial.click()
                         choices = page.get_by_role("checkbox",name="Select case",exact=True)
                         expect(choices).to_have_count(3)
+                        page.get_by_text("Select case",exact=True).nth(2).click()
+                        page.get_by_role("button",name="Select all High Match",exact=True).click()
+                        expect(page.locator('input[type="checkbox"]:checked')).to_have_count(3)
+                        page.get_by_role("button",name="Select all High Match",exact=True).click()
+                        expect(page.get_by_role("button",name="Selected cases (3)",exact=True)).to_be_enabled()
+                        report["checks"]["select_all_high_preserves_partial_without_duplicates"] = True
+                        page.get_by_role("button",name="Clear all selections",exact=True).click()
+                        expect(page.locator('input[type="checkbox"]:checked')).to_have_count(0)
+                        report["checks"]["clear_all_updates_visible_checkboxes"] = True
                         started = perf_counter()
                         page.get_by_text("Select case",exact=True).nth(0).click()
                         expect(page.get_by_role("button",name="Selected cases (1)",exact=True)).to_be_visible()
@@ -87,8 +110,9 @@ with patch("app.config.DB_PATH",Path({str(database)!r})), patch("app.config.get_
                         expect(items).to_have_count(3)
                         initial = items.all_text_contents()
                         report["checks"]["independent_same_title_and_slide_versions"] = len(set(initial))==3
-                        page.get_by_role("button",name="Confirm order",exact=True).click()
-                        expect(page.get_by_text("Order confirmed for 3 slides.",exact=True)).to_be_visible()
+                        expect(page.get_by_role("button",name="Confirm order",exact=True)).to_have_count(0)
+                        expect(page.get_by_role("button",name="Generate PPTX",exact=True)).to_be_enabled()
+                        expect(page.get_by_role("button",name="Download PPTX",exact=True)).to_be_disabled()
                         started = perf_counter()
                         cards.first.hover()
                         start,target = cards.first.bounding_box(),cards.nth(2).bounding_box()
@@ -98,14 +122,12 @@ with patch("app.config.DB_PATH",Path({str(database)!r})), patch("app.config.get_
                         page.mouse.move(target["x"]+target["width"]/2,target["y"]+target["height"]/2,steps=20)
                         page.mouse.up()
                         expect(items.first).to_have_text(initial[1])
-                        expect(page.get_by_text("Order confirmed for 3 slides.",exact=True)).to_have_count(0)
+                        expect(page.get_by_role("button",name="Generate PPTX",exact=True)).to_be_enabled()
                         report["drag_browser_ms"] = round((perf_counter()-started)*1000,3)
                         reordered = items.all_text_contents()
                         report["checks"]["real_drag_order"] = reordered==[initial[1],initial[2],initial[0]]
-                        report["checks"]["drag_invalidates_confirmation"] = True
+                        report["checks"]["drag_can_be_exported_without_separate_confirmation"] = True
                         report["checks"]["selection_actions_do_not_search"] = len(events.read_text().splitlines())==1
-                        page.get_by_role("button",name="Confirm order",exact=True).click()
-                        expect(page.get_by_text("Order confirmed for 3 slides.",exact=True)).to_be_visible()
                         page.screenshot(path=str(output.with_suffix(".png")),full_page=True)
                         page.get_by_role("tab",name="Search results",exact=True).click()
                         page.get_by_role("textbox",name="Search cases",exact=True).fill("unmatchedzzzz")
@@ -113,22 +135,23 @@ with patch("app.config.DB_PATH",Path({str(database)!r})), patch("app.config.get_
                         expect(page.get_by_text("No matching cases. Try a broader keyword.",exact=True)).to_be_visible()
                         page.get_by_role("button",name="Selected cases (3)",exact=True).click()
                         expect(items.first).to_have_text(reordered[0])
-                        expect(page.get_by_text("Order confirmed for 3 slides.",exact=True)).to_be_visible()
-                        report["checks"]["selection_order_and_confirmation_survive_new_search"] = True
+                        report["checks"]["selection_order_survives_new_search"] = True
                         before_remove_ids = cards.evaluate_all("rows => rows.map(row => row.dataset.caseId)")
                         page.get_by_role("button",name="Remove case: "+reordered[0].replace("\n"," · "),exact=True).click()
                         expect(items).to_have_count(2)
                         report["checks"]["cross_removes_exact_case"] = cards.evaluate_all("rows => rows.map(row => row.dataset.caseId)")==before_remove_ids[1:]
-                        expect(page.get_by_text("Order confirmed for 3 slides.",exact=True)).to_have_count(0)
-                        report["checks"]["remove_invalidates_confirmation"] = True
+                        expect(page.get_by_role("button",name="Generate PPTX",exact=True)).to_be_enabled()
+                        report["checks"]["remove_can_be_exported_without_separate_confirmation"] = True
                         export_ids = cards.evaluate_all("rows => rows.map(row => row.dataset.caseId)")
-                        page.get_by_role("button",name="Confirm order",exact=True).click()
-                        expect(page.get_by_text("Order confirmed for 2 slides.",exact=True)).to_be_visible()
                         expect(page.get_by_role("tab",name="Export",exact=True)).to_have_count(0)
                         expect(page.get_by_role("button",name="Generate PPTX",exact=True)).to_be_enabled()
                         expect(page.get_by_text("Slide order",exact=True)).to_have_count(0)
                         report["checks"]["ordering_and_export_share_one_tab"] = True
-                        report["checks"]["confirmed_order_available_for_phase7"] = True
+                        generate_box=page.get_by_role("button",name="Generate PPTX",exact=True).bounding_box()
+                        download_box=page.get_by_role("button",name="Download PPTX",exact=True).bounding_box()
+                        assert generate_box["y"]<cards.first.bounding_box()["y"] and abs(generate_box["y"]-download_box["y"])<5
+                        expect(page.get_by_role("heading",name="Export PPTX",exact=True)).to_have_count(0)
+                        report["checks"]["export_buttons_share_toolbar_above_ordered_list"] = True
                         if include_export:
                             from lxml import etree as ET
                             from pptx import Presentation
@@ -137,7 +160,7 @@ with patch("app.config.DB_PATH",Path({str(database)!r})), patch("app.config.get_
                             started = perf_counter()
                             page.get_by_role("button",name="Generate PPTX",exact=True).click()
                             download = page.get_by_role("button",name="Download PPTX",exact=True)
-                            expect(download).to_be_visible(timeout=60000)
+                            expect(download).to_be_enabled(timeout=60000)
                             report["generate_browser_ms"] = round((perf_counter()-started)*1000,3)
                             folder = output.parent / "artifacts/stage7"
                             folder.mkdir(parents=True,exist_ok=True)
@@ -158,14 +181,15 @@ with patch("app.config.DB_PATH",Path({str(database)!r})), patch("app.config.get_
                             with connect(database) as conn:
                                 tasks = conn.execute("SELECT * FROM tasks WHERE kind='EXPORT'").fetchall()
                             report["checks"]["repeated_generate_reuses_one_task"] = len(tasks)==1
+                            report["checks"]["generate_click_freezes_current_order"] = json.loads(tasks[0]["payload_json"])["case_ids"]==export_ids
                             report["export_output"] = str(downloaded)
                             report["export_bytes"] = downloaded.stat().st_size
                         page.get_by_role("tab",name="Search results",exact=True).click()
                         page.get_by_role("textbox",name="Search cases",exact=True).fill("synthetic")
                         page.get_by_role("button",name="Search",exact=True).click()
-                        details = page.get_by_text("Partial Match (3)",exact=True)
+                        details = page.get_by_text("Partial Match (1)",exact=True)
                         expect(details).to_be_visible()
-                        if not choices.first.is_visible():
+                        if not details.evaluate("node => node.closest('details').open"):
                             details.click()
                         expect(choices).to_have_count(3)
                         expect(page.locator('input[type="checkbox"]:checked')).to_have_count(2)
@@ -179,8 +203,9 @@ with patch("app.config.DB_PATH",Path({str(database)!r})), patch("app.config.get_
                         expect(page.get_by_role("button",name="Confirm order",exact=True)).to_have_count(0)
                         report["checks"]["consecutive_crosses_can_remove_last_case"] = True
                         page.get_by_role("tab",name="Search results",exact=True).click()
-                        if not choices.first.is_visible():
-                            page.get_by_text("Partial Match (3)",exact=True).click()
+                        details=page.get_by_text("Partial Match (1)",exact=True)
+                        if not details.evaluate("node => node.closest('details').open"):
+                            details.click()
                         expect(choices).to_have_count(3)
                         expect(page.locator('input[type="checkbox"]:checked')).to_have_count(0)
                         report["checks"]["empty_selection_clears_all_checkboxes"] = True
@@ -188,7 +213,7 @@ with patch("app.config.DB_PATH",Path({str(database)!r})), patch("app.config.get_
                             page.get_by_role("button",name="Clear finished tasks",exact=True).click()
                             page.get_by_role("tab",name="Selected cases",exact=True).click()
                             expect(page.get_by_role("button",name="Generate PPTX",exact=True)).to_be_disabled()
-                            expect(page.get_by_role("button",name="Download PPTX",exact=True)).to_have_count(0)
+                            expect(page.get_by_role("button",name="Download PPTX",exact=True)).to_be_disabled()
                             report["checks"]["clear_finished_removes_generated_files"] = not list((temporary / "exports").glob("*.pptx"))
                         report["search_requests"] = len(events.read_text().splitlines())
                         report["checks"]["only_explicit_searches_ran"] = report["search_requests"]==3

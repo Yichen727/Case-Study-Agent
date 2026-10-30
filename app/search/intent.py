@@ -2,6 +2,7 @@
 import hashlib
 import json
 import re
+import unicodedata
 from typing import Literal
 
 import httpx
@@ -12,13 +13,13 @@ from app import config
 from app.db.repository import connect
 from app.search.embedding_service import SearchServiceError
 
-PARSER_VERSION = "search-intent-v4"
+PARSER_VERSION = "search-intent-v5-en"
 MAX_QUERY_BYTES = 6000
 
 
 class Requirement(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    description: str = Field(max_length=220)
+    description: str = Field(max_length=220,description="Concise English description for the English-language application UI.")
     kind: Literal["client","services","pillar","content","ai_production","interactive",
                   "quantified_outcomes","no_additional_filming","link_type","source"]
     terms: list[str] = Field(max_length=8)
@@ -28,8 +29,8 @@ class Requirement(BaseModel):
 
 class SearchIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    summary: str = Field(max_length=350)
-    keywords: list[str] = Field(max_length=24)
+    summary: str = Field(max_length=350,description="A concise English summary. Always write English, regardless of the request language.")
+    keywords: list[str] = Field(max_length=24,description="English retrieval terms; preserve explicit proper names and production-tool names.")
     mandatory: list[Requirement] = Field(max_length=8)
     preferred: list[Requirement] = Field(max_length=6)
     excluded: list[Requirement] = Field(max_length=4)
@@ -49,13 +50,21 @@ conditions in unresolved_mandatory rather than silently dropping them. Unresolve
 Each requirement must be atomic. If BOTH webcast and podcast are required, create two requirements.
 For each requirement copy its full supporting sentence into request_quote, including all qualifiers;
 never quote only the negative noun and omit 'partial match' or 'related examples' from that sentence.
-Write summary and descriptions in the same language as the user. Never switch to an unrelated language.
+The application UI and case corpus are English. ALWAYS write summary, descriptions,
+retrieval keywords and unresolved_mandatory in ENGLISH, regardless of the input language.
+Do not translate them into Spanish or another language. Preserve proper names.
+request_quote is the exception: copy it verbatim from the supplied request.
 For content/services/pillar conditions, terms are synonymous literal evidence phrases, not unrelated
 concepts: matching any one term supports that atomic requirement. Use short atomic phrases, generally
 one or two words, and common wording variants (for example webcast/live stream, podcast/audio series).
 Avoid overly specific multi-adjective phrases that require the slide to repeat the user's exact wording.
 Do not infer a client name from its industry. Do not invent numerical thresholds or restrictions.
 Use ai_production for AI actually used to make the work, not a film advertising an AI product.
+For a broad request for AI-generated, AI-made or generative content, use one ai_production
+condition with empty terms. These are synonymous descriptions, not separate requirements.
+Only put a specific method or tool in ai_production terms when the user actually requests
+it, such as dubbing, lip sync, or Adobe Firefly. Do not add a generic content condition
+that merely repeats the same AI-production requirement.
 Use interactive for audience participation. Use quantified_outcomes for reported audience/campaign
 effectiveness, never equipment counts, audience size targets or background problem statistics.
 For quantified_outcomes, terms can name the requested metric and minimum is the numeric threshold
@@ -94,13 +103,26 @@ Excluded and unresolved_mandatory: [].
 unresolved_mandatory: [Explicit redistribution permission]. Do not claim a licence from topical words.
 Use single words where possible for topical concepts. Never put observations about how to search,
 write the answer, keep evidence honest, or handle partial examples into unresolved_mandatory.
+6. 'AI generated content' => summary: 'Cases featuring AI-generated content.';
+mandatory: ai_production with terms []; preferred, excluded and unresolved_mandatory: [].
+Write all human-readable output in English; request_quote remains verbatim input.
 """
+
+
+def normalize_query(query):
+    """Remove harmless search framing, preserving the actual brief and constraints."""
+    text = " ".join(unicodedata.normalize("NFKC",query).split()).casefold()
+    text = re.sub(r"\bai[-\u2010-\u2015](?=\w)", "ai ", text)
+    text = re.sub(
+        r"^(?:(?:please\s+)?(?:show me|find(?: me)?|give me)\s+(?:the\s+)?)?"
+        r"(?:case studies|case study|cases|case)\s+(?:about|on)\s+", "", text)
+    return text.rstrip(".!?").strip()
 
 
 def interpret_query(db_path, query):
     settings = config.get_ai_settings()
-    normalized = " ".join(query.split()).casefold()
-    key = hashlib.sha256((PARSER_VERSION+"\n"+settings.model+"\n"+normalized).encode()).hexdigest()
+    query = normalize_query(query)
+    key = hashlib.sha256((PARSER_VERSION+"\n"+settings.model+"\n"+query).encode()).hexdigest()
     with connect(db_path) as conn:
         row = conn.execute("SELECT payload_json FROM query_intent_cache WHERE cache_key=?",(key,)).fetchone()
     if row:
@@ -122,7 +144,7 @@ def interpret_query(db_path, query):
         for group in ("mandatory","preferred","excluded"):
             kept = []
             for requirement in getattr(intent,group):
-                anchor = " ".join(requirement.request_quote.split()).casefold()
+                anchor = normalize_query(requirement.request_quote)
                 if not anchor or anchor not in normalized_query:
                     if group != "preferred":
                         intent.unresolved_mandatory.append(requirement.description)

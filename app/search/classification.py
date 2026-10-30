@@ -144,7 +144,8 @@ def check_requirement(case, metadata, requirement):
         if kind == "ai_production":
             generic_words = {"ai","gen","generative","generated","led","driven","production","produced",
                              "in","using","used","content","workflow","workflows","tools","actual",
-                             "make","making","create","created","artificial","intelligence"}
+                             "make","made","making","create","created","creating","generate","generating",
+                             "generation","artificial","intelligence"}
             specific = [term for term in terms if not words(term).issubset(generic_words)]
             if specific:
                 evidence_terms = specific
@@ -179,8 +180,11 @@ def classify(case, metadata, intent, semantic, lexical_coverage, keyword_terms):
     if intent:
         unknown.extend({"requirement":condition,"status":"UNKNOWN","quote":None,"source":"Request interpretation"} for condition in intent.unresolved_mandatory)
     topic_quote = quote_for(case["original_text"],keyword_terms)
-    strong = (semantic is not None and semantic>=0.52) or lexical_coverage>=0.60
-    related = (semantic is not None and semantic>=0.40) or lexical_coverage>=0.10
+    # Direct evidence for every requested hard condition outweighs a wording-based
+    # similarity score. Unknown/excluded conditions still block High Match below.
+    evidenced = bool(mandatory) and all(item["status"] == "MET" for item in mandatory)
+    strong = evidenced or (semantic is not None and semantic>=0.52) or lexical_coverage>=0.60
+    related = evidenced or (semantic is not None and semantic>=0.40) or lexical_coverage>=0.10
     if failures or not related:
         level = "Not a Match"
         reason = "Conflicts with: " + "; ".join(item["requirement"] for item in failures) if failures else "Insufficient relevance to the requested theme."
