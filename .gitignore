@@ -10,5 +10,6 @@ data/uploads/
 data/backups/
 data/incoming/
 data/exports/
-evaluation/artifacts/
+evaluation/
+tests/
 .DS_Store
