@@ -10,6 +10,10 @@ data/uploads/
 data/backups/
 data/incoming/
 data/exports/
+assets/templates/*.pptx
 evaluation/
-tests/
+tests/*
+!tests/conftest.py
+!tests/test_api.py
+!tests/test_template_export.py
 .DS_Store

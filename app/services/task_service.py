@@ -203,7 +203,7 @@ class TaskManager:
             elif task["kind"] == "EXPORT":
                 output = self.db_path.parent / "exports" / f"{payload['cache_key']}.pptx"
                 export_original_slides(payload,output,progress=progress)
-                summary = {"output_path":str(output),"slide_count":len(payload["slides"]),"cache_key":payload["cache_key"]}
+                summary = {"output_path":str(output),"slide_count":payload["slide_count"],"cache_key":payload["cache_key"]}
             else:
                 raise ValueError("Unsupported task kind")
             self._update(task_id, status="SUCCEEDED", stage="Complete", completed=1, total=1,

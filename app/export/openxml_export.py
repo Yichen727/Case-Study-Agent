@@ -2,6 +2,7 @@
 from contextlib import ExitStack
 from copy import deepcopy
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 import posixpath
 import shutil
@@ -147,6 +148,57 @@ class _PartCopier:
             self.mapping.update(previous)
 
 
+def presentation_slide_ids(path):
+    """Slide IDs in presentation order, without reconstructing slide content."""
+    with ZipFile(path) as package:
+        return list(_Source(package).slides)
+
+
+def _merge_embedded_fonts(presentation, sources, copier, relationship):
+    """Reuse identical embedded faces; never silently replace a conflicting font."""
+    merged = ET.Element(f"{{{P}}}embeddedFontLst")
+    entries, fingerprints = {}, {}
+    for path, source in sources.items():
+        rels = {rel.get("Id"): rel for rel in source.presentation_rels}
+        for original in source.presentation.findall(f"{{{P}}}embeddedFontLst/{{{P}}}embeddedFont"):
+            name = original.find(f"{{{P}}}font").get("typeface").casefold()
+            if name not in entries:
+                entry = deepcopy(original)
+                for face in list(entry):
+                    if face.tag != f"{{{P}}}font":
+                        entry.remove(face)
+                entries[name] = entry
+                merged.append(entry)
+            for face in original:
+                if face.tag == f"{{{P}}}font":
+                    continue
+                rel = rels[face.get(f"{{{R}}}id")]
+                part = _resolve("ppt/presentation.xml", rel.get("Target"))
+                fingerprint = hashlib.sha256(source.zip.read(part)).digest()
+                key = (name, face.tag)
+                if key in fingerprints:
+                    if fingerprints[key] != fingerprint:
+                        raise OriginalSlideExportError("These decks embed different versions of the same font.",
+                                                       "EXPORT_EMBEDDED_FONTS")
+                    continue
+                fingerprints[key] = fingerprint
+                copied = deepcopy(face)
+                copied.set(f"{{{R}}}id", relationship(rel.get("Type"), copier.copy(path, part)))
+                entries[name].append(copied)
+    order = ("font", "regular", "bold", "italic", "boldItalic")
+    for entry in entries.values():
+        entry[:] = sorted(entry,key=lambda node:order.index(ET.QName(node).localname))
+    previous = presentation.find(f"{{{P}}}embeddedFontLst")
+    if previous is not None:
+        position = list(presentation).index(previous)
+        presentation.remove(previous)
+    else:
+        following = {"custShowLst", "photoAlbum", "custDataLst", "kinsoku", "defaultTextStyle", "modifyVerifier", "extLst"}
+        position = next((i for i, node in enumerate(presentation) if ET.QName(node).localname in following),len(presentation))
+    if len(merged):
+        presentation.insert(position, merged)
+
+
 def export_slides(slides: list[SlideReference], output_path: str | Path) -> Path:
     if not slides:
         raise OriginalSlideExportError("Select at least one slide.")
@@ -162,10 +214,6 @@ def export_slides(slides: list[SlideReference], output_path: str | Path) -> Path
             first = sources[source_paths[0]]
             if any(source.size != first.size for source in sources.values()):
                 raise OriginalSlideExportError("Presentations have different slide sizes; automatic scaling is not supported.","EXPORT_SIZE_MISMATCH")
-            for path in source_paths[1:]:
-                fonts = sources[path].presentation.find(f"{{{P}}}embeddedFontLst")
-                if fonts is not None and len(fonts):
-                    raise OriginalSlideExportError("Mixing multiple presentations with embedded fonts has not yet been validated.","EXPORT_EMBEDDED_FONTS")
             selected = []
             for ref in slides:
                 path = Path(ref.source_path).resolve()
@@ -188,7 +236,7 @@ def export_slides(slides: list[SlideReference], output_path: str | Path) -> Path
 
                 rid_mapping = {}
                 for rel in first.presentation_rels:
-                    if rel.get("Type").rsplit("/", 1)[-1] in {"slide", "slideMaster", "notesMaster"}:
+                    if rel.get("Type").rsplit("/", 1)[-1] in {"slide", "slideMaster", "notesMaster", "font"}:
                         continue
                     external = rel.get("TargetMode") == "External"
                     target = rel.get("Target") if external else copier.copy(source_paths[0], _resolve("ppt/presentation.xml", rel.get("Target")))
@@ -196,6 +244,7 @@ def export_slides(slides: list[SlideReference], output_path: str | Path) -> Path
                 for node in presentation.iter():
                     if node.get(f"{{{R}}}id") in rid_mapping:
                         node.set(f"{{{R}}}id", rid_mapping[node.get(f"{{{R}}}id")])
+                _merge_embedded_fonts(presentation, sources, copier, relationship)
                 for name in ("sldMasterIdLst", "notesMasterIdLst", "sldIdLst", "custShowLst", "extLst"):
                     child = presentation.find(f"{{{P}}}{name}")
                     if child is not None:

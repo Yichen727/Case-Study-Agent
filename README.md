@@ -65,6 +65,8 @@ Selections stay available as you change result pages or search again, within the
 3. Click **Generate PPTX** above the list. This confirms the current order and starts generation.
 4. When ready, click **Download PPTX** beside it.
 
+The file includes the company template's first four pages, your cases in the chosen order, and the template's final page. For example, two selected cases produce seven slides. Keep the supplied template in [assets/templates](assets/templates/README.md) when moving the app to another computer.
+
 If you change the selection or order, generate a new file before downloading. Existing files retain the order used when they were generated.
 
 The export uses the original editable slides. Metadata corrections do not rewrite slide content. Check the downloaded deck in PowerPoint before sharing.
@@ -97,3 +99,5 @@ Retries apply to the selected case's entire source deck and preserve manual corr
 Keep the project's **data** folder: it contains your case library and original presentation copies needed for export.
 
 Download files you want to keep before using **Clear finished tasks**. This removes generated PPTX files from the app; imported cases and original presentation copies are retained.
+
+For the optional Microsoft Copilot Studio integration, maintainers can follow the [search API setup guide](docs/COPILOT_API.md). Employees using Streamlit do not need to install or configure the API.

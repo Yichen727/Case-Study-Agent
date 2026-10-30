@@ -4,7 +4,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from app.export.slide_export import CaseExportError, export_error_message
+from app.export.slide_export import CaseExportError, EXPORT_ENGINE_VERSION, export_error_message
 from app.services.task_service import TaskQueueFull
 from app.ui.selection_state import export_order_snapshot, selected_ids
 
@@ -31,7 +31,7 @@ def render_export_panel(db_path, manager, owner, cases):
     generate, download, _ = st.columns([1,1,3])
     with generate:
         if st.button("Generate PPTX",type="primary",disabled=not snapshot or len(cases)!=len(snapshot) or same_running,
-                     help="Confirms the current slide order and generates the original editable PPTX."):
+                     help="Confirms the current order and inserts original case slides after page 4 of the company template."):
             try:
                 task_id = manager.submit_export(export_order_snapshot(st.session_state),owner)
                 st.session_state["last_export_task_id"] = task_id
@@ -44,6 +44,7 @@ def render_export_panel(db_path, manager, owner, cases):
         st.download_button("Download PPTX",data=(lambda:download_bytes(path)) if path else b"",mime=PPTX_MIME,
                            file_name=f"case-studies-{result['slide_count']}-slides.pptx" if path else "case-studies.pptx",
                            disabled=path is None,on_click="ignore")
+    st.caption("Your ordered cases are inserted between pages 4 and 5 of the company template.")
     if any(case["review_status"]=="NEEDS_REVIEW" or case["unverified_ai"] for case in cases):
         st.caption("Some selected metadata is incomplete or AI-inferred; the original slides can still be exported.")
 
@@ -59,6 +60,8 @@ def render_export_panel(db_path, manager, owner, cases):
         different_selection = tuple(plan["case_ids"])!=selected_ids(st.session_state)
         if different_selection:
             st.info("This download uses the selection fixed when generation started. Your current selection is different.")
+        if plan["engine_version"] != EXPORT_ENGINE_VERSION:
+            st.info("This file uses an earlier export format. Generate again to use the company template.")
         st.success(f"Presentation ready: {result['slide_count']} slides.")
         if different_selection:
             with st.expander("Slides in this file"):

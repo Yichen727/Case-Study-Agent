@@ -1,0 +1,380 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Case Study Search API",
+    "version": "1.0.0",
+    "description": "Search the existing case-study library and return evidence-backed slide matches."
+  },
+  "host": "127.0.0.1:8000",
+  "basePath": "/",
+  "schemes": [
+    "http"
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "securityDefinitions": {
+    "ApiKey": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "X-API-Key"
+    }
+  },
+  "security": [
+    {
+      "ApiKey": []
+    }
+  ],
+  "paths": {
+    "/api/search": {
+      "post": {
+        "operationId": "SearchCaseStudies",
+        "summary": "Search case-study slides",
+        "description": "Search existing case-study slides using the full user brief. Returns ranked matches, original evidence, mandatory-check outcomes and uncertainty. Additional structured conditions supplement the brief. Keep distinct case_id values even when names match. UNKNOWN is not proof that a mandatory condition is satisfied. Does not edit slides or metadata.",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/SearchRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ranked slide matches, including evidence gaps and search notices.",
+            "schema": {
+              "$ref": "#/definitions/SearchResponse"
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "422": {
+            "description": "Invalid search request.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "503": {
+            "description": "Search library or service unavailable.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "500": {
+            "description": "Unexpected search failure.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "SearchCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "client",
+            "services",
+            "pillar",
+            "content",
+            "ai_production",
+            "interactive",
+            "quantified_outcomes",
+            "no_additional_filming",
+            "link_type",
+            "source"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 220,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "terms": {
+          "description": "Alternative evidence phrases for ONE condition; any term may match. Use separate conditions to require both.",
+          "items": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Terms",
+          "type": "array"
+        },
+        "minimum": {
+          "minimum": 0,
+          "type": "number",
+          "default": null,
+          "description": "Optional lower bound for quantified_outcomes only, e.g. 2000000 views.",
+          "title": "Minimum",
+          "x-nullable": true
+        }
+      },
+      "required": [
+        "kind",
+        "description"
+      ],
+      "title": "SearchCondition",
+      "type": "object"
+    },
+    "SearchRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "description": "Full search brief, including all must-haves and exclusions. Maximum 6000 UTF-8 bytes.",
+          "maxLength": 6000,
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "mandatory_conditions": {
+          "items": {
+            "$ref": "#/definitions/SearchCondition"
+          },
+          "maxItems": 8,
+          "type": "array",
+          "default": null,
+          "description": "Additional mandatory checks; never replaces requirements or exclusions in query.",
+          "title": "Mandatory Conditions",
+          "x-nullable": true
+        },
+        "preferred_conditions": {
+          "items": {
+            "$ref": "#/definitions/SearchCondition"
+          },
+          "maxItems": 6,
+          "type": "array",
+          "default": null,
+          "description": "Additional preferences. Missing preferred evidence does not become a hard failure.",
+          "title": "Preferred Conditions",
+          "x-nullable": true
+        },
+        "limit": {
+          "default": 5,
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "title": "SearchRequest",
+      "type": "object"
+    },
+    "ConditionCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "requirement": {
+          "title": "Requirement",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "MET",
+            "NOT_MET",
+            "UNKNOWN"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "quote": {
+          "type": "string",
+          "title": "Quote",
+          "x-nullable": true
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requirement",
+        "status",
+        "quote",
+        "source"
+      ],
+      "title": "ConditionCheck",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "quote": {
+          "title": "Quote",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "quote"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "SearchResult": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "title": "Case Id",
+          "type": "string"
+        },
+        "case_name": {
+          "title": "Case Name",
+          "type": "string"
+        },
+        "client": {
+          "type": "string",
+          "title": "Client",
+          "x-nullable": true
+        },
+        "match_level": {
+          "enum": [
+            "High Match",
+            "Partial Match",
+            "Not a Match"
+          ],
+          "title": "Match Level",
+          "type": "string"
+        },
+        "match_reason": {
+          "title": "Match Reason",
+          "type": "string"
+        },
+        "supporting_evidence": {
+          "items": {
+            "$ref": "#/definitions/Evidence"
+          },
+          "title": "Supporting Evidence",
+          "type": "array"
+        },
+        "source_file": {
+          "title": "Source File",
+          "type": "string"
+        },
+        "slide_number": {
+          "title": "Slide Number",
+          "type": "integer"
+        },
+        "review_status": {
+          "enum": [
+            "CONFIRMED",
+            "NEEDS_REVIEW"
+          ],
+          "title": "Review Status",
+          "type": "string"
+        },
+        "condition_checks": {
+          "items": {
+            "$ref": "#/definitions/ConditionCheck"
+          },
+          "title": "Condition Checks",
+          "type": "array"
+        },
+        "preferred_checks": {
+          "items": {
+            "$ref": "#/definitions/ConditionCheck"
+          },
+          "title": "Preferred Checks",
+          "type": "array"
+        },
+        "uncertainties": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Uncertainties",
+          "type": "array"
+        }
+      },
+      "required": [
+        "case_id",
+        "case_name",
+        "client",
+        "match_level",
+        "match_reason",
+        "supporting_evidence",
+        "source_file",
+        "slide_number",
+        "review_status",
+        "condition_checks",
+        "preferred_checks",
+        "uncertainties"
+      ],
+      "title": "SearchResult",
+      "type": "object"
+    },
+    "SearchResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "results": {
+          "items": {
+            "$ref": "#/definitions/SearchResult"
+          },
+          "title": "Results",
+          "type": "array"
+        },
+        "search_mode": {
+          "enum": [
+            "hybrid",
+            "keyword"
+          ],
+          "title": "Search Mode",
+          "type": "string"
+        },
+        "notices": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notices",
+          "type": "array"
+        }
+      },
+      "required": [
+        "results",
+        "search_mode",
+        "notices"
+      ],
+      "title": "SearchResponse",
+      "type": "object"
+    },
+    "ErrorResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "title": "Error",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "error",
+        "message"
+      ],
+      "title": "ErrorResponse",
+      "type": "object"
+    }
+  }
+}

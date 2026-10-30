@@ -9,6 +9,7 @@ DATA_DIR = PROJECT_ROOT / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 DB_PATH = DATA_DIR / "case_studies.sqlite3"
 ENV_FILE = PROJECT_ROOT / ".env"
+EXPORT_TEMPLATE_PATH = PROJECT_ROOT / "assets" / "templates" / "Case Study Tool Base Template.pptx"
 
 for directory in (DATA_DIR, UPLOAD_DIR):
     directory.mkdir(parents=True, exist_ok=True)
