@@ -2,20 +2,35 @@
 
 Find relevant case-study slides, choose their order, and export an editable PowerPoint deck.
 
-This guide is for employees running the tool locally on Windows. Use presentations approved for this tool.
+This guide is for employees running the tool locally on Windows or macOS. Use presentations approved for this tool.
 
 ## Setup
 
-You need Python 3.10 or later and an internet connection for AI features.
+Extract the complete installation ZIP to a folder, then use the launcher for your system:
 
-Open PowerShell in the project folder and install the app:
+| System | Start the app |
+| --- | --- |
+| Windows 10/11, 64-bit | Double-click **start.bat**. |
+| macOS, Intel or Apple Silicon | Double-click **start.command**. |
+
+If the internal package includes the approved company `.env`, no API key setup is needed. Otherwise, configure the key below for AI features. Do not run the app from inside the ZIP viewer.
+
+Both launchers find 64-bit Python 3.10 or later, create a private `.venv`, install requirements and start the app. Windows can install Python 3.13 through WinGet. macOS can install it through an existing Homebrew installation; if neither Python nor Homebrew is available, install approved Python from [python.org](https://www.python.org/downloads/macos/) once, or ask IT.
+
+Initial setup needs internet access and may take several minutes. Later launches reuse the environment; dependency installation runs again when the requirements, Python runtime or platform changes. Do not copy `.venv` between computers.
+
+The provided installation ZIP preserves the executable permission needed by `start.command`. If another ZIP tool removes it, run `chmod +x start.command` once in Terminal from the project folder. If macOS blocks the file, follow your organization's app-approval process; the launcher does not disable macOS security settings.
+
+If company policy blocks installation, ask IT to install Python or approve the required packages. The launcher leaves error messages visible.
+
+For manual setup on Windows, open PowerShell in the project folder:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Ask the project owner for an approved OpenAI API key. Create a file named `.env` beside `run.py` and add:
+If the project owner supplied the approved company `.env`, keep it beside `run.py`. Otherwise, ask for the approved API configuration and create `.env` there:
 
 ```dotenv
 OPENAI_API_KEY=your-approved-api-key
@@ -23,17 +38,27 @@ OPENAI_METADATA_MODEL=gpt-5.4-mini
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 ```
 
-Keep the key private. Do not share or commit `.env`. AI features send extracted case text and search queries to OpenAI; the original PPTX file is not uploaded to OpenAI.
+The approved shared company `.env` may be included in installation ZIPs for authorized employees. Keep it out of Git/GitHub and public distribution; `.gitignore` does not exclude it from manually created ZIPs. AI features send extracted case text and search queries to OpenAI; the original PPTX file is not uploaded to OpenAI.
 
-Start the app:
+Start with **start.bat** on Windows or **start.command** on macOS. For manual startup on Windows:
 
 ```powershell
 .\.venv\Scripts\python.exe run.py
 ```
 
-Open the local address shown in PowerShell, usually `http://localhost:8501`. Keep PowerShell open while using the app; press **Ctrl+C** to stop it.
+For manual setup and startup on macOS:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python run.py
+```
+
+The app opens in your browser, usually at `http://localhost:8501`. If it does not open automatically, use the address shown in the console. Keep the console open while using the app; press **Ctrl+C** to stop it before launching another copy.
 
 Without an API key, local uploads, keyword search and manual metadata editing remain available.
+
+To prepare an internal ZIP with the approved shared `.env`, run `python package_app.py --include-env`. The resulting `dist/Case Study Agent.zip` contains both launchers, the application and the company template, with macOS executable permissions preserved. `dist` is ignored by Git. Without `--include-env`, credentials are omitted. The package excludes `.venv`, `.git`, the case database and presentation snapshots; recipients import approved decks locally to build their case library.
 
 ## 1. Import presentations
 
@@ -91,6 +116,7 @@ Retries apply to the selected case's entire source deck and preserve manual corr
 
 | Issue | What to do |
 | --- | --- |
+| Startup reports a missing Python module | Close the app and run `start.bat` or `start.command` from the updated project folder to install the current requirements. |
 | Import fails | Open the file in PowerPoint, save a valid `.pptx` copy and upload it again. Check the 500 MB limit. |
 | No High Match results | Expand Partial Match and review the evidence gaps. Refine the brief if needed. |
 | AI or search preparation fails | Check the internet connection and ask the project owner to check the API key or quota. Use the relevant Retry button. |
