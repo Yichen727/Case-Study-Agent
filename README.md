@@ -58,7 +58,7 @@ The app opens in your browser, usually at `http://localhost:8501`. If it does no
 
 Without an API key, local uploads, keyword search and manual metadata editing remain available.
 
-To prepare an internal ZIP with the approved shared `.env`, run `python package_app.py --include-env`. The resulting `dist/Case Study Agent.zip` contains both launchers, the application and the company template, with macOS executable permissions preserved. `dist` is ignored by Git. Without `--include-env`, credentials are omitted. The package excludes `.venv`, `.git`, the case database and presentation snapshots; recipients import approved decks locally to build their case library.
+To prepare an internal ZIP with the approved shared `.env`, run `python package_app.py --include-env`. The resulting `dist/Case Study Agent - Local.zip` contains both launchers, the application and the company template, with macOS executable permissions preserved. `dist` is ignored by Git. Without `--include-env`, credentials are omitted. The package excludes `.venv`, `.git`, the case database and presentation snapshots; recipients import approved decks locally to build their case library.
 
 ## 1. Import presentations
 
@@ -125,5 +125,3 @@ Retries apply to the selected case's entire source deck and preserve manual corr
 Keep the project's **data** folder: it contains your case library and original presentation copies needed for export.
 
 Download files you want to keep before using **Clear finished tasks**. This removes generated PPTX files from the app; imported cases and original presentation copies are retained.
-
-For the optional Microsoft Copilot Studio integration, maintainers can follow the [search API setup guide](docs/COPILOT_API.md). Employees using Streamlit do not need to install or configure the API.

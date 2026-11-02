@@ -17,14 +17,11 @@ PARSER_VERSION = "search-intent-v5-en"
 MAX_QUERY_BYTES = 6000
 
 
-RequirementKind = Literal["client","services","pillar","content","ai_production","interactive",
-                          "quantified_outcomes","no_additional_filming","link_type","source"]
-
-
 class Requirement(BaseModel):
     model_config = ConfigDict(extra="forbid")
     description: str = Field(max_length=220,description="Concise English description for the English-language application UI.")
-    kind: RequirementKind
+    kind: Literal["client","services","pillar","content","ai_production","interactive",
+                  "quantified_outcomes","no_additional_filming","link_type","source"]
     terms: list[str] = Field(max_length=8)
     minimum: float | None
     request_quote: str = Field(default="",max_length=500,description="Full verbatim sentence from the user's request that states this condition, including partial/related-example qualifiers.")

@@ -5,7 +5,7 @@ import re
 from app.db.repository import CASE_SELECT, connect
 from app.search.classification import classify, contains
 from app.search.embedding_service import SearchServiceError, index_status, query_vector, semantic_scores
-from app.search.intent import SearchIntent, interpret_query, normalize_query, MAX_QUERY_BYTES
+from app.search.intent import interpret_query, normalize_query, MAX_QUERY_BYTES
 
 STOPWORDS = set("a an the and or of to for in on with from by as at is are be been this that these those it its their our we i me my us find show looking need want case cases study studies example examples content work project projects please would should must include including have has also only can could do not rather than which when where how such all both each more most some any into across through using used use relevant original material evidence match matches result results".split())
 
@@ -44,12 +44,7 @@ def _safe_future(future):
         return None,exc.code
 
 
-def search_cases(db_path, query, limit=10, *, mandatory_conditions=(), preferred_conditions=()):
-    """Search the shared library; explicit conditions supplement the parsed brief.
-
-    The optional conditions are validated Requirement objects. Existing UI calls
-    omit them and retain the same interpretation, retrieval and classification.
-    """
+def search_cases(db_path, query, limit=10):
     query = query.strip()
     if not query:
         return SearchResults()
@@ -70,27 +65,12 @@ def search_cases(db_path, query, limit=10, *, mandatory_conditions=(), preferred
     notices = []
     if intent_error:
         notices.append("AI request interpretation is unavailable. Requirements remain unconfirmed; results use keyword matching.")
-    supplied = [*mandatory_conditions,*preferred_conditions]
-    if supplied:
-        if intent is None:
-            # Explicit conditions can still be checked, but must never imply that
-            # other requirements in an uninterpreted brief have been satisfied.
-            intent = SearchIntent(summary=query[:350],keywords=keyword_terms(query)[:24],
-                                  mandatory=[],preferred=[],excluded=[],
-                                  unresolved_mandatory=["Free-text requirements could not be interpreted."])
-        intent = intent.model_copy(update={
-            "mandatory":[*intent.mandatory,*mandatory_conditions],
-            "preferred":[*intent.preferred,*preferred_conditions],
-        })
-    scores = semantic_scores(db_path,vector_result[0]) if vector_result and intent and not intent_error else {}
+    scores = semantic_scores(db_path,vector_result[0]) if vector_result and intent else {}
     if not scores:
         notices.append("Keyword-only search: semantic retrieval is unavailable or the index is not ready.")
     elif readiness["pending"]:
         notices.append("Some case vectors are updating; keyword retrieval still includes those cases.")
     terms = keyword_terms(" ".join(intent.keywords)) if intent else keyword_terms(query)
-    if supplied:
-        condition_text = " ".join(req.description + " " + " ".join(req.terms) for req in supplied)
-        terms = keyword_terms(" ".join(terms) + " " + condition_text)
     if not terms:
         terms = keyword_terms(query)
     lexical = lexical_candidates(db_path,terms)

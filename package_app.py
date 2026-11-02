@@ -17,9 +17,9 @@ def build_package(root, output, *, include_env=False):
     if missing:
         raise ValueError("Missing package files: " + ", ".join(missing))
     files.extend(sorted((root / "app").rglob("*.py")))
-    # Keep these guides and the optional API dependency list when available.
-    files.extend(path for path in (root / "requirements-api.txt", root / "assets/templates/README.md",
-        root / "docs/COPILOT_API.md", root / "docs/copilot-openapi.json") if path.is_file())
+    template_guide = root / "assets/templates/README.md"
+    if template_guide.is_file():
+        files.append(template_guide)
     if output in files:
         raise ValueError("The ZIP must not replace a project input file.")
     output.parent.mkdir(parents=True,exist_ok=True)
@@ -37,7 +37,7 @@ def build_package(root, output, *, include_env=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--include-env",action="store_true",help="Include approved shared company credentials for authorized internal recipients.")
-    parser.add_argument("--output",type=Path,default=ROOT / "dist" / "Case Study Agent.zip")
+    parser.add_argument("--output",type=Path,default=ROOT / "dist" / "Case Study Agent - Local.zip")
     args = parser.parse_args()
     output = build_package(ROOT,args.output,include_env=args.include_env)
     print(f"Installation ZIP created: {output}")

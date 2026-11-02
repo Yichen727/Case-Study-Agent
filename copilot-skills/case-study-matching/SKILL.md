@@ -5,7 +5,7 @@ description: Find and compare Atomized Studios case-study slides, explain eviden
 
 # Case-study matching and selection
 
-Use this workflow for employees finding relevant existing work, checking suitability against a brief, comparing slide versions, or exporting an ordered case-study deck. Work with the configured, authorized knowledge and actually enabled tools. This package includes an offline original-slide exporter and the company template. It does not include a database connection, search API credentials or the original case-study decks; original decks must be available as actual files in the execution environment.
+Use this workflow for employees finding relevant existing work, checking suitability against a brief, comparing slide versions, or exporting an ordered case-study deck. Work with configured, authorized knowledge and uploaded attachments. This package includes an offline original-slide exporter and the company template. It runs independently of the local Python application and does not include a database connection or the original case-study decks; original decks must be available as actual files in the execution environment.
 
 ## Understand the brief
 
@@ -17,9 +17,7 @@ Use this workflow for employees finding relevant existing work, checking suitabi
 
 ## Retrieve actual slide records
 
-If an enabled `SearchCaseStudies` tool exists, use it with the full original brief in `query` and `limit=5` by default (maximum 10 per call). Leave structured condition arrays empty unless an explicit additional condition needs to be supplied. Do not weaken the brief when supplying conditions. Keep the tool's case IDs, match classifications, reasons, evidence, checks, uncertainties and notices; do not promote a match from unsupported model reasoning. Inspect cited originals when explaining a result, without inventing missing data.
-
-If that tool is not available, search the configured case-study knowledge directly. Identify your answer as a knowledge-based shortlist when this distinction matters. Do not claim to have called the Python MVP, searched SQLite, used its embeddings, verified its full library, or achieved identical rankings. Ground each result in an identifiable original slide or approved indexed slide record. If sources cannot be read, report the access gap rather than manufacture results or a claim that no case exists.
+Search the configured case-study knowledge and available uploaded presentations directly. Ground each result in an identifiable original slide or approved indexed slide record. Do not claim to have called the local Python MVP, searched its database, used its embeddings, verified its full library, or achieved identical rankings. If sources cannot be read, report the access gap rather than manufacture results or claim that no case exists.
 
 Use keywords and semantic relevance to discover candidates, then evaluate factual constraints from evidence. Search within the approved collection; do not run broad web searches or repeatedly reread every deck to answer one brief. Return up to five useful matches unless the user asks for more. Do not claim exhaustive coverage from partial retrieval.
 
@@ -27,7 +25,7 @@ Use keywords and semantic relevance to discover candidates, then evaluate factua
 
 - One qualifying original slide is one Slice Case. Retain its provided case ID, source presentation, original slide number, title and links.
 - Never merge records solely because their case names match. Keep different decks, READ MORE versus WATCH VIDEO variants, linked versus unlinked variants, and continuation slides separate.
-- If a backend ID is absent, identify a result by the exact source file and original slide number; do not invent a persistent backend ID. If identical filenames need disambiguation, use an available source reference or version.
+- If a case ID is absent, identify a result by the exact source file and original slide number; do not invent a persistent case ID. If identical filenames need disambiguation, use an available source reference or version.
 - Do not fill an individual slide's evidence gap by silently combining it with another version. You may explain complementary evidence from a separately cited slide.
 
 ## Extract metadata conservatively
@@ -70,7 +68,7 @@ For knowledge-based matching, classify consistently:
 - **Partial Match**: related work with an unknown/unsupported mandatory detail or weaker relevance, without a demonstrated disqualifying conflict.
 - **Not a Match**: a demonstrated hard-condition/exclusion conflict or insufficient relevance. Do not display these by default.
 
-Do not override an enabled search tool's evidence/classification with these natural-language judgments. If its results appear insufficient, explain the gap and use an available source or refinement; do not manufacture a better score.
+Reassess a classification only when additional source evidence supports the change. If evidence is insufficient, explain the gap or refine the search; do not manufacture stronger evidence or a better score.
 
 ## Present a concise shortlist
 
@@ -100,7 +98,7 @@ When asked to generate a deck, capture the current selection and order directly;
 
 The approved template is `Case Study Tool Base Template.pptx`; its current five-page version produces N+5 total slides for N selected case slides. Preserve original editable text, layout, fonts, images, charts and hyperlinks. Do not rewrite, summarize, redraw or rasterize source slides as a substitute for original-slide export. Leave all source presentations unchanged.
 
-Use the bundled exporter below when Python execution and original attachments are available. Do not stop merely because `SearchCaseStudies` is search-only: the bundled exporter operates independently without the API. Knowledge snippets and citations alone remain insufficient. If the actual files or runtime requirements are unavailable, provide the ordered source-file/slide manifest and clearly state that a PPTX has not been generated. Never fabricate a download link or claim visual fidelity was tested without rendering the file.
+Use the bundled exporter below when Python execution and original attachments are available. It works on uploaded files independently of the local Python application. Knowledge snippets and citations alone remain insufficient. If the actual files or runtime requirements are unavailable, provide the ordered source-file/slide manifest and clearly state that a PPTX has not been generated. Never fabricate a download link or claim visual fidelity was tested without rendering the file.
 
 ## Run the bundled original-slide exporter
 
@@ -129,7 +127,7 @@ Prerequisites: an available Python execution tool, the packaged files, preinstal
 6. Read the command's returned JSON. A successful operation inserts selected cases after template page 4, verifies total slide count, byte-identical original slide XML in the requested order, and resolution of internal package relationships. The engine retains related media, charts, layouts, masters, hyperlinks and compatible embedded fonts. These structural checks do not constitute a PowerPoint rendering or an unconditional visual-fidelity guarantee.
 7. Only after status `ok`, make the returned output file available through the environment's actual downloadable-file mechanism. Report the selected-case count and total-slide count. A local path printed by a script is not itself a user-accessible download link. Ask the employee to inspect the downloaded deck in PowerPoint before sharing.
 
-When an operation returns an error, explain the specific blocker and stop that attempt. Do not repeatedly generate scripts, silently remove embedded assets or links, rasterize the slides, or claim success. If files are visible only as extracted text, ask for originals through a supported file-input route. If attached files exceed the environment's processing limits or never appear as readable PPTX files, use a connected original-file/export service or the existing local MVP; more detailed instructions cannot create byte-level file access.
+When an operation returns an error, explain the specific blocker and stop that attempt. Do not repeatedly generate scripts, silently remove embedded assets or links, rasterize the slides, or claim success. If files are visible only as extracted text, ask for originals through a supported file-input route. If attached files exceed the environment's processing limits or never appear as readable PPTX files, explain that the user can export separately in the existing local MVP; more detailed instructions cannot create byte-level file access.
 
 ## Source and access boundaries
 
