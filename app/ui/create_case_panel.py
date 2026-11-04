@@ -81,47 +81,52 @@ def _clear_case_buffers():
 
 
 def _render_history(manager, owner, current):
+    if st.session_state.pop("_close_case_history", False):
+        st.session_state["case-history"] = False
+    popover = st.popover("History", icon=":material/history:", help="Saved case drafts",
+                         key="case-history", on_change="rerun")
+    if not popover.open:
+        return
     entries = manager.drafts.history()
-    with st.expander(f"Saved drafts ({len(entries)})"):
+    active_ids = manager.active_case_drafts(owner)
+    with popover:
+        st.caption(f"Saved drafts ({len(entries)})")
         if not entries:
             st.caption("No saved drafts yet.")
             return
-        ids = [entry["draft_id"] for entry in entries]
-        labels = {entry["draft_id"]: f"{entry['title']} · {entry['client']} · {entry['updated_at'][:19].replace('T', ' ')} UTC"
-                  for entry in entries}
-        if st.session_state.get("draft-history") not in ids:
-            st.session_state.pop("draft-history", None)
-        index = ids.index(current.draft_id) if current and current.draft_id in ids else 0
-        selected = st.selectbox("Choose a saved draft", ids, index=index, format_func=labels.__getitem__, key="draft-history")
-        busy = manager.case_task(selected, owner, active_only=True) is not None
-        opened, deleted, _ = st.columns([1, 1, 3])
-        if opened.button("Open draft", key="history-open",
-                         help="Saves current field edits before opening the selected draft. No AI call is made."):
-            editor = st.session_state.get("_case_editor")
-            if current and editor and editor["draft_id"] == current.draft_id and editor["dirty"]:
-                _save_editor(manager, current, editor)
-            manager.drafts.open(selected)
-            _clear_case_buffers()
-            st.session_state["_case_notice"] = "Saved draft opened."
-            st.rerun()
-        if deleted.button("Delete draft", key="history-delete", disabled=busy,
-                          help="Permanently deletes the selected draft and its generated PPTX files."):
-            manager.delete_case_draft(selected)
-            if current and current.draft_id == selected:
-                _clear_case_buffers()
-            st.session_state.pop("draft-history", None)
-            st.session_state["_case_notice"] = "Draft and its generated files deleted."
-            st.rerun()
-        st.caption("Opening saves current field edits. Deleting permanently removes the selected draft and its generated files.")
-        if busy:
-            st.caption("This draft is being processed. Delete it after the task finishes.")
+        with st.container(height=min(330, 128 * len(entries)), width=440, border=False):
+            for entry in entries:
+                draft_id = entry["draft_id"]
+                with st.container(border=True, key=f"history-row-{draft_id}"):
+                    opened, deleted = st.columns([8, 1], vertical_alignment="top")
+                    if opened.button(entry["title"], key=f"history-open:{draft_id}", type="tertiary", width="stretch",
+                                     help="Save current field edits and open this draft."):
+                        editor = st.session_state.get("_case_editor")
+                        if current and editor and editor["draft_id"] == current.draft_id and editor["dirty"]:
+                            _save_editor(manager, current, editor)
+                        manager.drafts.open(draft_id)
+                        _clear_case_buffers()
+                        st.session_state["_case_notice"] = "Saved draft opened."
+                        st.session_state["_close_case_history"] = True
+                        st.rerun()
+                    opened.caption(f"{entry['client']} · {entry['updated_at'][:19].replace('T', ' ')} UTC")
+                    if deleted.button("×", key=f"history-delete:{draft_id}", type="tertiary", disabled=draft_id in active_ids,
+                                      help="Delete this draft and its generated PPTX files. Processing drafts cannot be deleted."):
+                        manager.delete_case_draft(draft_id)
+                        if current and current.draft_id == draft_id:
+                            _clear_case_buffers()
+                        st.session_state["_case_notice"] = "Draft and its generated files deleted."
+                        st.rerun()
+        st.caption("Click a title to open. × permanently deletes the draft and its local generated files.")
 
 
 def _render(manager, owner):
     draft = manager.drafts.current()
-    title, reset = st.columns([4, 1])
+    title, history, reset = st.columns([4, 1, 1.2])
     with title:
         st.subheader("Create case")
+    with history:
+        _render_history(manager, owner, draft)
     with reset:
         if st.button("Start new case", key="create-new"):
             manager.drafts.start_new()
@@ -130,7 +135,6 @@ def _render(manager, owner):
     st.caption("Draft an English case from your project notes. Missing facts stay blank; images and video are left empty.")
     if notice := st.session_state.pop("_case_notice", None):
         st.success(notice)
-    _render_history(manager, owner, draft)
     settings = get_ai_settings()
     if not settings.api_key:
         st.info("Ask the project owner to configure the OpenAI API key to write a new case. Saved drafts can still be edited and exported.")

@@ -133,6 +133,13 @@ class TaskManager:
             row = conn.execute(sql + " ORDER BY created_at DESC,rowid DESC LIMIT 1", args).fetchone()
             return dict(row) if row else None
 
+    def active_case_drafts(self, owner="local"):
+        with connect(self.db_path) as conn:
+            return {row[0] for row in conn.execute(
+                """SELECT DISTINCT json_extract(payload_json,'$.draft_id') FROM tasks
+                   WHERE owner=? AND kind IN ('CASE_GENERATE','CASE_EXPORT')
+                   AND status IN ('QUEUED','RUNNING')""", (owner,))}
+
     def submit_case_generation(self, draft_id, details=None, owner="local"):
         with self._lock:
             active = self.case_task(draft_id, owner, kind="CASE_GENERATE", active_only=True)
