@@ -56,6 +56,7 @@ def prepare_generated_export(draft):
 
 
 def export_generated_case(plan, store):
+    store.load(plan["draft_id"])
     if plan["template_sha256"] != template_hash():
         raise GeneratedExportError("CASE_TEMPLATE_CHANGED")
     if plan["engine_version"] != ENGINE_VERSION:

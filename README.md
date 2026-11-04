@@ -121,7 +121,9 @@ Retries apply to the selected case's entire source deck and preserve manual corr
 
 This produces **one editable slide** using `assets/templates/Single Case Template.pptx`. Client and Services are saved with the draft but do not appear on the slide. Images and video stay empty. Check the wording and slide in PowerPoint before sharing.
 
-The latest saved draft is restored when you reopen the app. Edits survive tab changes within the current session; use Save draft or Generate PPTX to preserve them after a refresh. After editing, generate again to enable a current download. **Start new case** opens a blank input; older drafts remain on disk, without a draft-history interface.
+The latest saved draft is restored when you reopen the app. Edits survive tab changes within the current session; use Save draft or Generate PPTX to preserve them after a refresh. After editing, generate again to enable a current download. **Start new case** opens a blank input and keeps earlier drafts.
+
+Expand **Saved drafts** to choose earlier work by title, Client and last saved time. **Open draft** saves current field edits and opens the selected draft without an AI request. **Delete draft** permanently removes the selected draft and its local generated PPTX files; deletion is disabled while that draft is being processed.
 
 New drafts and their slides are stored in `data/generated_cases` and retained by **Clear finished tasks**. They are separate from the case library and cannot yet be searched or combined with existing slides.
 

@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import re
+import stat
 from threading import RLock
 from uuid import uuid4
 
@@ -14,8 +15,8 @@ from app.services.case_generation import edit_case
 class DraftStorageError(ValueError):
     code = "DRAFT_STORAGE_FAILED"
 
-    def __init__(self):
-        super().__init__("The local draft could not be read or saved. Your previous saved draft is retained.")
+    def __init__(self, message="The local draft could not be read or saved. Your previous saved draft is retained."):
+        super().__init__(message)
 
 
 class DraftChangedError(ValueError):
@@ -29,6 +30,7 @@ class DraftStore:
     def __init__(self, data_dir):
         self.root = Path(data_dir).resolve() / "generated_cases"
         self.lock = RLock()
+        self._history_cache = None
 
     def folder(self, draft_id):
         if not re.fullmatch(r"[0-9a-f]{32}", draft_id):
@@ -53,6 +55,8 @@ class DraftStore:
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
             temporary.replace(path)
+            if path.name == "draft.json":
+                self._history_cache = None
         except OSError:
             raise DraftStorageError() from None
         finally:
@@ -83,6 +87,55 @@ class DraftStore:
         """Leave previous drafts intact; the next submitted input creates a new ID."""
         with self.lock:
             self._write(self.root / "current.json", {"draft_id": None})
+
+    def history(self):
+        """Read saved metadata once; saves and deletions invalidate this cache."""
+        with self.lock:
+            if self._history_cache is None:
+                entries = []
+                for path in self.root.glob("*/draft.json"):
+                    draft = self.load(path.parent.name)
+                    entries.append({"draft_id": draft.draft_id,
+                                    "title": draft.content.title or draft.original_description[:60] or "Untitled draft",
+                                    "client": draft.content.client or "Unknown client", "updated_at": draft.updated_at})
+                self._history_cache = sorted(entries, key=lambda item: (item["updated_at"], item["draft_id"]), reverse=True)
+            return [dict(entry) for entry in self._history_cache]
+
+    def open(self, draft_id):
+        with self.lock:
+            draft = self.load(draft_id)
+            self._write(self.root / "current.json", {"draft_id": draft_id})
+            return draft
+
+    def delete(self, draft_id):
+        """Remove one managed draft and its files, keeping metadata until last."""
+        with self.lock:
+            folder = self.folder(draft_id)
+            entries = list(folder.rglob("*"))
+            # Validate every resolved target before recursive file removal, including
+            # Windows junctions. Never follow links outside this managed draft.
+            for path in [folder, *entries]:
+                attributes = getattr(path.lstat(), "st_file_attributes", 0)
+                if (path.is_symlink() or attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+                        or not path.resolve().is_relative_to(folder)):
+                    raise DraftStorageError()
+            current = self.current()
+            if current and current.draft_id == draft_id:
+                self.start_new()
+            self._history_cache = None
+            try:
+                metadata = folder / "draft.json"
+                for path in sorted(entries, key=lambda entry: len(entry.parts), reverse=True):
+                    if path == metadata:
+                        continue
+                    if path.is_dir():
+                        path.rmdir()
+                    else:
+                        path.unlink()
+                metadata.unlink()
+                folder.rmdir()
+            except OSError:
+                raise DraftStorageError("The draft could not be fully deleted. Close its generated files and try again.") from None
 
     def create(self, description):
         with self.lock:

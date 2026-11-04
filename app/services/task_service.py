@@ -158,6 +158,18 @@ class TaskManager:
             draft = self.drafts.load(draft_id)
             return self.drafts.commit_generated(draft, complete_case(draft))
 
+    def delete_case_draft(self, draft_id):
+        with self._lock:
+            with connect(self.db_path) as conn:
+                if conn.execute("""SELECT 1 FROM tasks WHERE kind IN ('CASE_GENERATE','CASE_EXPORT')
+                                   AND json_extract(payload_json,'$.draft_id')=?
+                                   AND status IN ('QUEUED','RUNNING') LIMIT 1""", (draft_id,)).fetchone():
+                    raise TaskQueueFull("This draft is being processed. Wait for its tasks to finish before deleting it.")
+            self.drafts.delete(draft_id)
+            with connect(self.db_path) as conn:
+                conn.execute("""DELETE FROM tasks WHERE kind IN ('CASE_GENERATE','CASE_EXPORT')
+                                AND json_extract(payload_json,'$.draft_id')=?""", (draft_id,))
+
     def submit_case_export(self, draft_id, owner="local"):
         with self._lock:
             plan = prepare_generated_export(self.drafts.load(draft_id))
@@ -314,23 +326,24 @@ class TaskManager:
             return [dict(row) for row in conn.execute(sql,args).fetchall()]
 
     def retry(self, task_id, owner="local"):
-        task = self.get_task(task_id, owner)
-        if not task or task["status"] not in {"FAILED", "INTERRUPTED"}:
-            return False
-        payload = json.loads(task["payload_json"])
-        if task["kind"] == "IMPORT" and not Path(payload["input_path"]).is_file():
-            return False
-        self._reserve()
-        with connect(self.db_path) as conn:
-            updated = conn.execute("""UPDATE tasks SET status='QUEUED',stage='Queued',error_code=NULL,
-                                     payload_json=?,updated_at=CURRENT_TIMESTAMP WHERE task_id=? AND owner=?
-                                     AND status IN ('FAILED','INTERRUPTED')""",
-                                   (json.dumps({**payload,"refresh_pages":True}),task_id,owner))
-        if not updated.rowcount:
-            self._capacity.release()
-            return False
-        self._enqueue(task_id)
-        return True
+        with self._lock:
+            task = self.get_task(task_id, owner)
+            if not task or task["status"] not in {"FAILED", "INTERRUPTED"}:
+                return False
+            payload = json.loads(task["payload_json"])
+            if task["kind"] == "IMPORT" and not Path(payload["input_path"]).is_file():
+                return False
+            self._reserve()
+            with connect(self.db_path) as conn:
+                updated = conn.execute("""UPDATE tasks SET status='QUEUED',stage='Queued',error_code=NULL,
+                                         payload_json=?,updated_at=CURRENT_TIMESTAMP WHERE task_id=? AND owner=?
+                                         AND status IN ('FAILED','INTERRUPTED')""",
+                                       (json.dumps({**payload,"refresh_pages":True}),task_id,owner))
+            if not updated.rowcount:
+                self._capacity.release()
+                return False
+            self._enqueue(task_id)
+            return True
 
     def _remove_input(self, task):
         payload = json.loads(task["payload_json"])
