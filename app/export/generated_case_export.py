@@ -16,8 +16,8 @@ from app.ingestion.errors import IngestionError
 ENGINE_VERSION = "generated-case-v1"
 ERROR_MESSAGES = {
     "CASE_EXPORT_INCOMPLETE": "Add a title and at least one body section before generating the slide.",
-    "CASE_EXPORT_BODY_TOO_LONG": "Shorten the combined Brief, Creative and Impact to 250 words or fewer.",
-    "CASE_EXPORT_TITLE_TOO_LONG": "Shorten the title to 40 characters or fewer before generating the slide.",
+    "CASE_EXPORT_BODY_TOO_LONG": "Please shorten Brief, Creative and Impact to fit the slide before exporting.",
+    "CASE_EXPORT_TITLE_TOO_LONG": "Please shorten the title to fit the template before exporting.",
     "CASE_TEMPLATE_INVALID": "The single-case template is missing or unsupported. Restore it in assets/templates.",
     "CASE_TEMPLATE_CHANGED": "The single-case template changed during generation. Generate the slide again.",
     "CASE_EXPORT_FAILED": "The slide could not be generated. Your saved draft is retained; please try again.",

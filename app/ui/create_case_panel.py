@@ -76,7 +76,7 @@ def _download_path(manager, draft, content, dirty):
 
 
 def _clear_case_buffers():
-    for key in ("_case_editor", "_create_description", "_create_reply", "create_description"):
+    for key in ("_case_editor", "_create_description", "_create_reply", "_create_reply_round", "create_description"):
         st.session_state.pop(key, None)
 
 
@@ -157,32 +157,51 @@ def _render(manager, owner):
             st.info("Writing your draft in the background. You can use the other tabs while it runs.")
         return
 
+    editor = _editor(draft)
+    content = Content(**editor["values"])
+    visible_draft = draft.model_copy(update={"content": content,
+                                            "details_skipped": draft.details_skipped if content == draft.content else False})
     with st.expander("Your project notes"):
         st.text(draft.original_description)
-        if draft.clarification:
-            st.text(draft.clarification)
-    if draft.clarification_question:
+        if len(draft.follow_ups) > 5:
+            st.caption(f"Showing the latest 5 of {len(draft.follow_ups)} additions. All additions are saved with the draft.")
+        for message in draft.follow_ups[-5:]:
+            st.text(message)
+    if visible_draft.clarification_question:
         with st.chat_message("assistant"):
-            st.write(draft.clarification_question)
-        reply_key = f"create_reply:{draft.draft_id}"
-        if reply_key not in st.session_state:
-            st.session_state[reply_key] = st.session_state.get("_create_reply", "")
-        reply = st.text_area("Additional details", key=reply_key, height=110, max_chars=6000, disabled=busy,
-                            on_change=_remember_input, args=(reply_key, "_create_reply"))
-        submit, skip, _ = st.columns([1, 1, 3])
-        if submit.button("Submit details", key="create-reply", disabled=busy or not settings.api_key):
-            if not reply.strip():
-                st.warning("Enter additional details, or choose Skip and continue.")
-                return
-            manager.submit_case_generation(draft.draft_id, reply.strip(), owner)
-            st.rerun()
-        if skip.button("Skip and continue", key="create-skip", disabled=busy):
-            manager.skip_case_details(draft.draft_id, owner)
-            st.rerun()
+            st.write(visible_draft.clarification_question)
+    else:
+        st.caption("Add details or wording refinements whenever you need them.")
+    reply_key = f"create_reply:{draft.draft_id}"
+    reply_round = (draft.draft_id, draft.request_count)
+    if st.session_state.get("_create_reply_round", reply_round) != reply_round:
+        st.session_state[reply_key] = ""
+        st.session_state["_create_reply"] = ""
+    st.session_state["_create_reply_round"] = reply_round
+    if reply_key not in st.session_state:
+        st.session_state[reply_key] = st.session_state.get("_create_reply", "")
+    reply = st.text_area("Additional details", key=reply_key, height=110, max_chars=6000, disabled=busy,
+                         placeholder="Add project facts, correct information or request a wording refinement.",
+                         on_change=_remember_input, args=(reply_key, "_create_reply"))
+    submit, skip, _ = st.columns([1, 1, 3])
+    if submit.button("Submit details", key="create-reply", disabled=busy or not settings.api_key):
+        if not reply.strip():
+            st.warning("Enter additional details before submitting.")
+            return
+        editor = st.session_state.get("_case_editor")
+        if editor and editor["draft_id"] == draft.draft_id and editor["dirty"]:
+            _save_editor(manager, draft, editor)
+        manager.submit_case_generation(draft.draft_id, reply.strip(), owner)
+        st.rerun()
+    if skip.button("Skip for now", key="create-skip", disabled=busy or draft.details_skipped):
+        editor = st.session_state.get("_case_editor")
+        if editor and editor["draft_id"] == draft.draft_id and editor["dirty"]:
+            _save_editor(manager, draft, editor)
+        manager.skip_case_details(draft.draft_id, owner)
+        st.rerun()
     if busy:
         st.info("Updating your draft in the background. Saved manual edits will be retained.")
 
-    editor = _editor(draft)
     st.text_input("Title", key=f"create:{draft.draft_id}:title", max_chars=160, on_change=_capture_edit,
                   args=("title", f"create:{draft.draft_id}:title"))
     client, services, pillar = st.columns([1, 2, 1])
@@ -194,18 +213,13 @@ def _render(manager, owner):
     for name in ("brief", "creative", "impact"):
         st.text_area(name.upper(), key=f"create:{draft.draft_id}:{name}", height=135, max_chars=6000, placeholder="Not provided",
                      on_change=_capture_edit, args=(name, f"create:{draft.draft_id}:{name}"))
-    content = Content(**editor["values"])
     if editor["dirty"]:
         st.caption("Unsaved edits. Save draft or Generate PPTX to keep them.")
-    st.caption(f"Body: {content.body_words} words · target 120–250 total. Client and Services are saved with the draft and do not appear on the slide.")
-    if content.missing_fields:
-        st.caption("Missing: " + ", ".join(name.title() for name in content.missing_fields))
-    if content.body_words < 120:
-        st.warning("Insufficient information: the body has fewer than 120 words. You can keep it short rather than invent facts.")
+    st.caption("Client and Services are saved with the draft only.")
     if content.body_words > 250:
-        st.warning("The body exceeds 250 words. Shorten it before generating the slide.")
+        st.warning("The text is too long for this slide. Please shorten it before exporting.")
     if content.title and len(content.title) > 40:
-        st.warning("Shorten the title to 40 characters or fewer to fit the template.")
+        st.warning("The title is too long for this layout. Please shorten it.")
     exporting = manager.case_task(draft.draft_id, owner, kind="CASE_EXPORT", active_only=True)
     path, stale = _download_path(manager, draft, content, bool(editor["dirty"]))
     save, generate, download = st.columns(3)

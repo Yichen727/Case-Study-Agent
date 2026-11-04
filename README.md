@@ -115,7 +115,7 @@ Retries apply to the selected case's entire source deck and preserve manual corr
 ## 5. Create a new case
 
 1. Open **Create case**, describe the client, project background, creative work and actual results, then click **Create draft**.
-2. If information is missing, answer the single follow-up or choose **Skip and continue**. Unavailable facts stay blank; planned goals are not presented as achieved results.
+2. **Additional details** stays available for further facts or wording refinements, with no conversation-round limit. Missing information or a body under 120 words prompts you to add detail; **Skip for now** dismisses that prompt without closing the input. Unavailable facts stay blank; planned goals are not presented as achieved results.
 3. Check and edit the seven fields. Brief, Creative and Impact share a **120–250-word** range with no fixed section proportions. Short drafts are allowed and marked as insufficient information.
 4. Click **Save draft** to keep edits, or **Generate PPTX** to save and confirm the current wording, then **Download PPTX**. Shorten titles to 40 characters or fewer and body text to 250 words or fewer before export.
 
@@ -126,6 +126,8 @@ The latest saved draft is restored when you reopen the app. Edits survive tab ch
 Click the **History** icon beside **Create case** to view saved drafts by title, Client and last saved time. Click a title to save current field edits and open that draft without an AI request. Each entry's **×** permanently removes that draft and its local generated PPTX files; deletion is disabled while the draft is being processed.
 
 New drafts and their slides are stored in `data/generated_cases` and retained by **Clear finished tasks**. They are separate from the case library and cannot yet be searched or combined with existing slides.
+
+Each submitted message makes one AI request. Skip, save, navigation and PPTX generation make none. Submitted additions are saved with the draft; older drafts can also continue the conversation.
 
 ## Common issues
 

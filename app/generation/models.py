@@ -1,10 +1,10 @@
 """Structured drafts; completeness is separate from factual verification."""
 from datetime import datetime, timezone
 import re
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 CASE_FIELDS = ("title", "client", "services", "pillar", "brief", "creative", "impact")
 BODY_FIELDS = ("brief", "creative", "impact")
@@ -57,7 +57,7 @@ class Content(BaseModel):
 class SuggestedField(BaseModel):
     model_config = ConfigDict(extra="forbid")
     value: str | None = Field(max_length=6000)
-    evidence: list[str] = Field(max_length=6, description="Short verbatim excerpts from the user's original description or one reply. Never quote the generated draft.")
+    evidence: list[str] = Field(max_length=6, description="Short verbatim excerpts from the user's original description, supplied prior evidence or latest reply. Never quote generated prose.")
 
 
 class Suggestions(BaseModel):
@@ -81,7 +81,7 @@ class Provenance(BaseModel):
 
 class Draft(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 1
+    schema_version: int = 2
     draft_id: str = Field(default_factory=lambda: uuid4().hex)
     revision: int = 1
     created_at: str = Field(default_factory=now)
@@ -89,34 +89,45 @@ class Draft(BaseModel):
     original_description: str = Field(max_length=12000)
     clarification: str | None = Field(default=None, max_length=6000)
     clarification_used: bool = False
+    follow_ups: list[Annotated[str, Field(max_length=6000)]] = Field(default_factory=list)
+    details_skipped: bool = False
     content: Content = Field(default_factory=Content)
     provenance: dict[CaseField, Provenance] = Field(default_factory=dict)
     project_stage: ProjectStage = "UNKNOWN"
     unavailable_fields: list[CaseField] = Field(default_factory=list)
     model: str = ""
     prompt_version: str = ""
-    request_count: int = Field(default=0, ge=0, le=2)
+    request_count: int = Field(default=0, ge=0)
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
 
+    @model_validator(mode="after")
+    def restore_legacy_reply(self):
+        # Older files store a single reply. Retain it without treating the old
+        # clarification_used flag as a permanent conversation lock.
+        if self.clarification and not self.follow_ups:
+            self.follow_ups = [self.clarification]
+        self.schema_version = 2
+        return self
+
     @property
     def clarification_fields(self):
-        if self.clarification_used:
-            return []
-        return [name for name in self.content.missing_fields if name not in self.unavailable_fields]
+        return self.content.missing_fields
 
     @property
     def clarification_question(self):
-        labels = {"title": "the main project idea", "client": "the commissioning client",
-                  "services": "the services delivered", "pillar": "the case-study pillar",
-                  "brief": "the background and objective", "creative": "the creative approach and execution",
-                  "impact": "any actual results (or say if results are not available yet)"}
+        if self.details_skipped:
+            return None
         fields = self.clarification_fields
-        return "Please add " + "; ".join(labels[name] for name in fields) + ". You can skip anything unavailable." if fields else None
+        if fields:
+            return "Still missing: " + ", ".join(name.title() for name in fields) + "."
+        if self.content.body_words < MIN_BODY_WORDS:
+            return "The draft feels a little brief. A few more details about the background or creative approach could help."
+        return None
 
     @property
     def state(self):
-        return "AWAITING_DETAILS" if self.clarification_fields else "DRAFT_READY"
+        return "AWAITING_DETAILS" if self.clarification_question else "DRAFT_READY"
 
     @property
     def notices(self):

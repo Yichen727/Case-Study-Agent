@@ -146,8 +146,8 @@ class TaskManager:
             if active:
                 return active["task_id"]
             draft = self.drafts.load(draft_id)
-            if draft.request_count and (not draft.clarification_fields or details is None):
-                raise GenerationError("GENERATION_CLARIFICATION_CLOSED")
+            if draft.request_count and details is None:
+                raise GenerationError("GENERATION_INPUT_INVALID")
             self._reserve()
             task_id = uuid4().hex
             try:
@@ -288,7 +288,7 @@ class TaskManager:
             elif task["kind"] == "CASE_GENERATE":
                 base = Draft.model_validate(payload["base"])
                 current = self.drafts.load(base.draft_id)
-                if (current.request_count != base.request_count or current.clarification_used != base.clarification_used
+                if (current.request_count != base.request_count
                         or current.original_description != base.original_description):
                     raise DraftChangedError()
                 progress("Writing your case draft", 0, 1)

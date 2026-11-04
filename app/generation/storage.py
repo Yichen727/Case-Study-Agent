@@ -158,7 +158,6 @@ class DraftStore:
         with self.lock:
             current = self.load(base.draft_id)
             if (current.request_count != base.request_count
-                    or current.clarification_used != base.clarification_used
                     or current.original_description != base.original_description):
                 raise DraftChangedError()
             if current.revision != base.revision:
