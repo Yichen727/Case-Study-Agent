@@ -105,7 +105,8 @@ def fill_template(content: Content, output_path, *, template_path=None, remove_t
                 original = next(p for p in paragraphs[heading_index + 1:] if _text(p).startswith("("))
                 text = deepcopy(original)
                 _set_run_text(text, getattr(content, field) or "")
-                _spacing(heading, 14, before=6 if index else 0, after=2)
+                # Leave one body-line of space before each subsequent section.
+                _spacing(heading, 14, before=12 if index else 0, after=2)
                 _spacing(text, 12)
                 body.extend((heading, text))
             for shape in media:

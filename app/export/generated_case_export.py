@@ -13,7 +13,7 @@ from app.generation.template import fill_template, TemplateError, NS, SLIDE_PART
 from app.ingestion.validation import validate_pptx
 from app.ingestion.errors import IngestionError
 
-ENGINE_VERSION = "generated-case-v1"
+ENGINE_VERSION = "generated-case-v2-section-spacing"
 ERROR_MESSAGES = {
     "CASE_EXPORT_INCOMPLETE": "Add a title and at least one body section before generating the slide.",
     "CASE_EXPORT_BODY_TOO_LONG": "Please shorten Brief, Creative and Impact to fit the slide before exporting.",
