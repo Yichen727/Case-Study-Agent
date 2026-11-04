@@ -22,6 +22,7 @@ from app.search.embedding_service import index_status
 from app.ui.selection_panel import render_selected_cases
 from app.ui.selection_state import clear_selection, select_case, select_cases, selected_ids
 from app.export.slide_export import export_error_message
+from app.ui.create_case_panel import render_create_case, case_error_message
 
 PAGE_SIZE = 25
 st.set_page_config(page_title="Case Study Agent", layout="wide")
@@ -128,7 +129,7 @@ def display_field(case, field):
 
 
 st.title("Case Study Agent")
-st.caption("Import presentations in the background; search and review existing cases while they process.")
+st.caption("Search existing case studies or create a new case from your project notes.")
 if notice := st.session_state.pop("notice", None):
     st.success(notice)
 
@@ -205,6 +206,8 @@ with st.sidebar:
                     st.error(IngestionError(job["error_code"]).user_message())
                 elif job["kind"]=="EXPORT":
                     st.error(export_error_message(job["error_code"]))
+                elif job["kind"] in {"CASE_GENERATE", "CASE_EXPORT"}:
+                    st.error(case_error_message(job["error_code"]))
                 else:
                     st.error("This task could not be completed. Please try again.")
                 if st.button("Retry", key=f"retry:{job['task_id']}"):
@@ -220,8 +223,14 @@ with st.sidebar:
             st.rerun()
         if any(job["kind"]=="EXPORT" for job in jobs):
             st.caption("Clearing finished tasks also removes their generated PPTX files. Original decks are retained.")
+        if any(job["kind"] in {"CASE_GENERATE", "CASE_EXPORT"} for job in jobs):
+            st.caption("New case drafts and their slides are retained when finished tasks are cleared.")
         active = any(job["status"] in {"QUEUED", "RUNNING"} for job in jobs)
-        if data_version(DB_PATH) != st.session_state.get("data_version") or (polling and not active):
+        case_states = tuple((job["task_id"], job["status"]) for job in jobs if job["kind"] in {"CASE_GENERATE", "CASE_EXPORT"})
+        previous_case_states = st.session_state.get("_case_task_states")
+        st.session_state["_case_task_states"] = case_states
+        case_changed = previous_case_states is not None and case_states != previous_case_states
+        if data_version(DB_PATH) != st.session_state.get("data_version") or (polling and not active) or case_changed:
             st.rerun()
 
     show_tasks()
@@ -264,8 +273,8 @@ if st.session_state.get("active_tab") == "Export":
     focus_selection_tab()
 st.session_state["_active_tab"] = st.session_state["active_tab"]
 
-tab_search, tab_all, tab_metadata, tab_selected = st.tabs(
-    ["Search results", "All cases", "Needs Review", "Selected cases"],
+tab_search, tab_all, tab_metadata, tab_selected, tab_create = st.tabs(
+    ["Search results", "All cases", "Needs Review", "Selected cases", "Create case"],
     key="active_tab", on_change="rerun",
 )
 
@@ -324,6 +333,10 @@ if tab_search.open:
 if tab_selected.open:
     with tab_selected:
         render_selected_cases(DB_PATH,manager,owner)
+
+if tab_create.open:
+    with tab_create:
+        render_create_case(manager, owner)
 
 if tab_all.open:
     with tab_all:

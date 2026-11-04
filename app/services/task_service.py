@@ -17,6 +17,10 @@ from app.ingestion.validation import MAX_FILE_BYTES
 from app.services.enrichment_service import enrich_source
 from app.services.ingest_service import ingest_deck
 from app.services.ai_enrichment import infer_missing_metadata
+from app.generation.models import Draft
+from app.generation.storage import DraftStore, DraftChangedError, DraftStorageError
+from app.services.case_generation import start_case, complete_case, GenerationError
+from app.export.generated_case_export import prepare_generated_export, export_generated_case, GeneratedExportError
 
 
 class TaskQueueFull(RuntimeError):
@@ -26,6 +30,7 @@ class TaskQueueFull(RuntimeError):
 class TaskManager:
     def __init__(self, db_path, capacity=4):
         self.db_path = Path(db_path).resolve()
+        self.drafts = DraftStore(self.db_path.parent)
         init_db(self.db_path)
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="case-study")
         self._capacity = BoundedSemaphore(capacity)
@@ -114,6 +119,63 @@ class TaskManager:
             self._capacity.release()
             raise
         return task_id
+
+    def case_task(self, draft_id, owner="local", *, kind=None, active_only=False):
+        with connect(self.db_path) as conn:
+            sql = """SELECT * FROM tasks WHERE owner=? AND kind IN ('CASE_GENERATE','CASE_EXPORT')
+                     AND json_extract(payload_json,'$.draft_id')=?"""
+            args = [owner, draft_id]
+            if kind:
+                sql += " AND kind=?"
+                args.append(kind)
+            if active_only:
+                sql += " AND status IN ('QUEUED','RUNNING')"
+            row = conn.execute(sql + " ORDER BY created_at DESC,rowid DESC LIMIT 1", args).fetchone()
+            return dict(row) if row else None
+
+    def submit_case_generation(self, draft_id, details=None, owner="local"):
+        with self._lock:
+            active = self.case_task(draft_id, owner, kind="CASE_GENERATE", active_only=True)
+            if active:
+                return active["task_id"]
+            draft = self.drafts.load(draft_id)
+            if draft.request_count and (not draft.clarification_fields or details is None):
+                raise GenerationError("GENERATION_CLARIFICATION_CLOSED")
+            self._reserve()
+            task_id = uuid4().hex
+            try:
+                self._create(task_id, "CASE_GENERATE", "New case draft", owner,
+                             {"draft_id": draft_id, "base": draft.model_dump(), "details": details})
+            except Exception:
+                self._capacity.release()
+                raise
+            return task_id
+
+    def skip_case_details(self, draft_id, owner="local"):
+        with self._lock:
+            if self.case_task(draft_id, owner, kind="CASE_GENERATE", active_only=True):
+                raise TaskQueueFull("Wait for the current draft task before skipping.")
+            draft = self.drafts.load(draft_id)
+            return self.drafts.commit_generated(draft, complete_case(draft))
+
+    def submit_case_export(self, draft_id, owner="local"):
+        with self._lock:
+            plan = prepare_generated_export(self.drafts.load(draft_id))
+            with connect(self.db_path) as conn:
+                rows = conn.execute("""SELECT * FROM tasks WHERE owner=? AND kind='CASE_EXPORT' AND cache_key=?
+                                       AND status IN ('QUEUED','RUNNING','SUCCEEDED') ORDER BY rowid DESC""",
+                                    (owner, plan["cache_key"])).fetchall()
+            for task in rows:
+                if task["status"] != "SUCCEEDED" or Path(json.loads(task["result_json"])["output_path"]).is_file():
+                    return task["task_id"]
+            self._reserve()
+            task_id = uuid4().hex
+            try:
+                self._create(task_id, "CASE_EXPORT", "New case slide", owner, plan, cache_key=plan["cache_key"])
+            except Exception:
+                self._capacity.release()
+                raise
+            return task_id
 
     def ensure_indexing(self, owner="local", *, force=False):
         settings = config.get_ai_settings()
@@ -204,13 +266,27 @@ class TaskManager:
                 output = self.db_path.parent / "exports" / f"{payload['cache_key']}.pptx"
                 export_original_slides(payload,output,progress=progress)
                 summary = {"output_path":str(output),"slide_count":payload["slide_count"],"cache_key":payload["cache_key"]}
+            elif task["kind"] == "CASE_GENERATE":
+                base = Draft.model_validate(payload["base"])
+                current = self.drafts.load(base.draft_id)
+                if (current.request_count != base.request_count or current.clarification_used != base.clarification_used
+                        or current.original_description != base.original_description):
+                    raise DraftChangedError()
+                progress("Writing your case draft", 0, 1)
+                result = start_case(base.original_description) if not base.request_count else complete_case(base, payload["details"])
+                saved = self.drafts.commit_generated(base, result)
+                summary = {"draft_id": saved.draft_id, "revision": saved.revision, "body_words": saved.content.body_words}
+            elif task["kind"] == "CASE_EXPORT":
+                progress("Preparing your single case slide", 0, 1)
+                summary = export_generated_case(payload, self.drafts)
             else:
                 raise ValueError("Unsupported task kind")
             self._update(task_id, status="SUCCEEDED", stage="Complete", completed=1, total=1,
                          result_json=json.dumps(summary), error_code=None)
             self._remove_input(task)
         except Exception as exc:
-            code = exc.code if isinstance(exc,(IngestionError,CaseExportError,OriginalSlideExportError)) else "TASK_FAILED"
+            code = exc.code if isinstance(exc,(IngestionError,CaseExportError,OriginalSlideExportError,
+                                               GenerationError,DraftStorageError,DraftChangedError,GeneratedExportError)) else "TASK_FAILED"
             logging.getLogger(__name__).warning("Background task failed: %s", code)
             self._update(task_id, status="FAILED", stage="Could not complete this task", error_code=code)
 

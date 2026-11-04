@@ -1,6 +1,6 @@
 # Case Study Agent
 
-Find relevant case-study slides, choose their order, and export an editable PowerPoint deck.
+Find and arrange existing case-study slides, or draft a new case from your notes, then export editable PowerPoint files.
 
 This guide is for employees running the tool locally on Windows or macOS. Use presentations approved for this tool.
 
@@ -56,7 +56,7 @@ python3 -m venv .venv
 
 The app opens in your browser, usually at `http://localhost:8501`. If it does not open automatically, use the address shown in the console. Keep the console open while using the app; press **Ctrl+C** to stop it before launching another copy.
 
-Without an API key, local uploads, keyword search and manual metadata editing remain available.
+Without an API key, local uploads, keyword search, manual metadata editing and editing/exporting saved new-case drafts remain available.
 
 To prepare an internal ZIP with the approved shared `.env`, run `python package_app.py --include-env`. The resulting `dist/Case Study Agent - Local.zip` contains both launchers, the application and the company template, with macOS executable permissions preserved. `dist` is ignored by Git. Without `--include-env`, credentials are omitted. The package excludes `.venv`, `.git`, the case database and presentation snapshots; recipients import approved decks locally to build their case library.
 
@@ -112,6 +112,19 @@ Under **Retry automatic enrichment**:
 
 Retries apply to the selected case's entire source deck and preserve manual corrections. They do not generate missing Brief, Creative or Impact text.
 
+## 5. Create a new case
+
+1. Open **Create case**, describe the client, project background, creative work and actual results, then click **Create draft**.
+2. If information is missing, answer the single follow-up or choose **Skip and continue**. Unavailable facts stay blank; planned goals are not presented as achieved results.
+3. Check and edit the seven fields. Brief, Creative and Impact share a **120–250-word** range with no fixed section proportions. Short drafts are allowed and marked as insufficient information.
+4. Click **Save draft** to keep edits, or **Generate PPTX** to save and confirm the current wording, then **Download PPTX**. Shorten titles to 40 characters or fewer and body text to 250 words or fewer before export.
+
+This produces **one editable slide** using `assets/templates/Single Case Template.pptx`. Client and Services are saved with the draft but do not appear on the slide. Images and video stay empty. Check the wording and slide in PowerPoint before sharing.
+
+The latest saved draft is restored when you reopen the app. Edits survive tab changes within the current session; use Save draft or Generate PPTX to preserve them after a refresh. After editing, generate again to enable a current download. **Start new case** opens a blank input; older drafts remain on disk, without a draft-history interface.
+
+New drafts and their slides are stored in `data/generated_cases` and retained by **Clear finished tasks**. They are separate from the case library and cannot yet be searched or combined with existing slides.
+
 ## Common issues
 
 | Issue | What to do |
@@ -124,4 +137,4 @@ Retries apply to the selected case's entire source deck and preserve manual corr
 
 Keep the project's **data** folder: it contains your case library and original presentation copies needed for export.
 
-Download files you want to keep before using **Clear finished tasks**. This removes generated PPTX files from the app; imported cases and original presentation copies are retained.
+Download selected-case decks you want to keep before using **Clear finished tasks**. This removes those generated decks; imported cases, original presentation copies, and new-case drafts/slides are retained.

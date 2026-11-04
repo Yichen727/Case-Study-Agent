@@ -9,7 +9,8 @@ ROOT = Path(__file__).resolve().parent
 def build_package(root, output, *, include_env=False):
     root, output = Path(root).resolve(), Path(output).resolve()
     names = ["start.bat", "start.command", "start_app.py", "package_app.py", "run.py", "requirements.txt", "README.md",
-             ".streamlit/config.toml", "assets/templates/Case Study Tool Base Template.pptx"]
+             ".streamlit/config.toml", "assets/templates/Case Study Tool Base Template.pptx",
+             "assets/templates/Single Case Template.pptx"]
     if include_env:
         names.append(".env")
     files = [root / name for name in names]

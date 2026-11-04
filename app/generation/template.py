@@ -80,7 +80,7 @@ def _spacing(paragraph, line, before=0, after=0):
         properties.insert(index, element)
 
 
-def fill_template(content: Content, output_path, *, template_path=None):
+def fill_template(content: Content, output_path, *, template_path=None, remove_thumbnail=False):
     """Write a new one-slide sample. Only its slide XML is changed."""
     template = Path(template_path or config.SINGLE_CASE_TEMPLATE_PATH).resolve()
     output = Path(output_path).resolve()
@@ -118,7 +118,22 @@ def fill_template(content: Content, output_path, *, template_path=None):
                 with ZipFile(output, "x") as target:
                     created = True
                     for info in source.infolist():
-                        target.writestr(info, slide_xml if info.filename == SLIDE_PART else source.read(info.filename))
+                        if remove_thumbnail and info.filename == "docProps/thumbnail.jpeg":
+                            continue
+                        data = slide_xml if info.filename == SLIDE_PART else source.read(info.filename)
+                        if remove_thumbnail and info.filename == "_rels/.rels":
+                            relationships = _xml(data)
+                            for relationship in list(relationships):
+                                if relationship.get("Type", "").endswith("/metadata/thumbnail"):
+                                    relationships.remove(relationship)
+                            data = E.tostring(relationships, xml_declaration=True, encoding="UTF-8", standalone=True)
+                        if remove_thumbnail and info.filename == "[Content_Types].xml":
+                            types = _xml(data)
+                            for element in list(types):
+                                if element.get("PartName") == "/docProps/thumbnail.jpeg":
+                                    types.remove(element)
+                            data = E.tostring(types, xml_declaration=True, encoding="UTF-8", standalone=True)
+                        target.writestr(info, data)
             except Exception:
                 if created:
                     output.unlink(missing_ok=True)
