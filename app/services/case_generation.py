@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from app.config import get_ai_settings
 from app.generation.models import CASE_FIELDS, Content, Draft, Provenance, Suggestions, clean_text, now
 
-PROMPT_VERSION = "new-case-v2-dialogue"
+PROMPT_VERSION = "new-case-v3-retry"
 REQUEST_TIMEOUT_SECONDS = 40
 MAX_OUTPUT_TOKENS = 4500
 MAX_PRIOR_EVIDENCE_CHARS = 8000
@@ -144,11 +144,13 @@ def _apply_suggestions(previous, output, reply, settings, usage):
     }, deep=True)
 
 
-def _generate(previous, reply=None):
+def _generate(previous, reply=None, *, regenerate=False):
     settings = get_ai_settings()
     if not settings.api_key:
         raise GenerationError("GENERATION_NOT_CONFIGURED")
     payload = {"description": previous.original_description, "reply": reply,
+               "operation": "Regenerate the AI-written fields with fresh wording, preserving supported facts and locked fields."
+                            if regenerate else "Create or update the draft.",
                "prior_user_evidence": _prior_evidence(previous),
                "current_draft": previous.content.model_dump(), "pillar_vocabulary": PILLARS,
                "locked_fields": {name: getattr(previous.content, name) for name, source in previous.provenance.items()
@@ -196,6 +198,15 @@ def complete_case(draft, details=None):
     result = _generate(draft, details)
     return result.model_copy(update={"clarification": details, "clarification_used": True, "details_skipped": False,
                                      "follow_ups": [*draft.follow_ups, details], "revision": draft.revision + 1,
+                                     "updated_at": now()}, deep=True)
+
+
+def retry_case(draft):
+    """One explicit regeneration request, retaining attachments and conversation."""
+    if not draft.request_count:
+        raise GenerationError("GENERATION_DRAFT_NOT_READY")
+    result = _generate(draft, draft.follow_ups[-1] if draft.follow_ups else None, regenerate=True)
+    return result.model_copy(update={"details_skipped": False, "revision": draft.revision + 1,
                                      "updated_at": now()}, deep=True)
 
 

@@ -19,7 +19,7 @@ from app.services.ingest_service import ingest_deck
 from app.services.ai_enrichment import infer_missing_metadata
 from app.generation.models import Draft
 from app.generation.storage import DraftStore, DraftChangedError, DraftStorageError
-from app.services.case_generation import start_case, complete_case, GenerationError
+from app.services.case_generation import start_case, complete_case, retry_case, GenerationError
 from app.export.generated_case_export import prepare_generated_export, export_generated_case, GeneratedExportError
 
 
@@ -140,19 +140,21 @@ class TaskManager:
                    WHERE owner=? AND kind IN ('CASE_GENERATE','CASE_EXPORT')
                    AND status IN ('QUEUED','RUNNING')""", (owner,))}
 
-    def submit_case_generation(self, draft_id, details=None, owner="local"):
+    def submit_case_generation(self, draft_id, details=None, owner="local", *, retry=False):
         with self._lock:
             active = self.case_task(draft_id, owner, kind="CASE_GENERATE", active_only=True)
             if active:
                 return active["task_id"]
             draft = self.drafts.load(draft_id)
-            if draft.request_count and details is None:
+            if retry and not draft.request_count:
+                raise GenerationError("GENERATION_DRAFT_NOT_READY")
+            if draft.request_count and details is None and not retry:
                 raise GenerationError("GENERATION_INPUT_INVALID")
             self._reserve()
             task_id = uuid4().hex
             try:
                 self._create(task_id, "CASE_GENERATE", "New case draft", owner,
-                             {"draft_id": draft_id, "base": draft.model_dump(), "details": details})
+                             {"draft_id": draft_id, "base": draft.model_dump(), "details": details, "retry": retry})
             except Exception:
                 self._capacity.release()
                 raise
@@ -292,7 +294,10 @@ class TaskManager:
                         or current.original_description != base.original_description):
                     raise DraftChangedError()
                 progress("Writing your case draft", 0, 1)
-                result = start_case(base.original_description) if not base.request_count else complete_case(base, payload["details"])
+                if payload.get("retry"):
+                    result = retry_case(base)
+                else:
+                    result = start_case(base.original_description) if not base.request_count else complete_case(base, payload["details"])
                 saved = self.drafts.commit_generated(base, result)
                 summary = {"draft_id": saved.draft_id, "revision": saved.revision, "body_words": saved.content.body_words}
             elif task["kind"] == "CASE_EXPORT":

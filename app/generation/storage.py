@@ -9,6 +9,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from app.generation.models import CASE_FIELDS, Draft, now
+from app.generation.images import CaseImageError, MAX_IMAGES
 from app.services.case_generation import edit_case
 
 
@@ -137,12 +138,75 @@ class DraftStore:
             except OSError:
                 raise DraftStorageError("The draft could not be fully deleted. Close its generated files and try again.") from None
 
-    def create(self, description):
+    def image_path(self, draft_id, image, *, preview=False):
+        suffix = "preview.png" if preview else image.extension
+        return self.folder(draft_id) / "images" / f"{image.sha256}.{suffix}"
+
+    def _save_images(self, draft_id, images):
+        for image in images:
+            for preview, data in ((False, image.data), (True, image.preview)):
+                path = self.image_path(draft_id, image.metadata, preview=preview)
+                temporary = path.with_name(f".{uuid4().hex}.tmp")
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    temporary.write_bytes(data)
+                    temporary.replace(path)
+                except OSError:
+                    raise DraftStorageError() from None
+                finally:
+                    try:
+                        temporary.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+
+    def add_images(self, draft_id, images):
         with self.lock:
-            draft = Draft(original_description=description)
+            draft = self.load(draft_id)
+            if len(draft.images) + len(images) > MAX_IMAGES:
+                raise CaseImageError("Choose up to four images in total.")
+            if not images:
+                return draft
+            self._save_images(draft_id, images)
+            result = draft.model_copy(update={"images": [*draft.images, *(image.metadata for image in images)],
+                                              "revision": draft.revision + 1, "updated_at": now()}, deep=True)
+            self._write(self.folder(draft_id) / "draft.json", result.model_dump())
+            return result
+
+    def remove_image(self, draft_id, index):
+        with self.lock:
+            draft = self.load(draft_id)
+            if not 0 <= index < len(draft.images):
+                raise CaseImageError("This image is no longer in the draft. Please reopen the draft.")
+            images = list(draft.images)
+            images.pop(index)
+            # Keep immutable files for an export already queued with the old revision.
+            # Deleting the draft removes all its images and old exports together.
+            result = draft.model_copy(update={"images": images, "revision": draft.revision + 1,
+                                              "updated_at": now()}, deep=True)
+            self._write(self.folder(draft_id) / "draft.json", result.model_dump())
+            return result
+
+    def create(self, description, images=()):
+        with self.lock:
+            if len(images) > MAX_IMAGES:
+                raise CaseImageError("Choose up to four images in total.")
+            draft = Draft(original_description=description, images=[image.metadata for image in images])
+            self._save_images(draft.draft_id, images)
             self._write(self.folder(draft.draft_id) / "draft.json", draft.model_dump())
             self._write(self.root / "current.json", {"draft_id": draft.draft_id})
             return draft
+
+    def update_description(self, draft_id, description):
+        with self.lock:
+            draft = self.load(draft_id)
+            if draft.request_count:
+                raise DraftChangedError()
+            if description == draft.original_description:
+                return draft
+            result = Draft.model_validate({**draft.model_dump(), "original_description": description,
+                                           "revision": draft.revision + 1, "updated_at": now()})
+            self._write(self.folder(draft_id) / "draft.json", result.model_dump())
+            return result
 
     def edit(self, draft_id, changes):
         with self.lock:
@@ -165,6 +229,7 @@ class DraftStore:
                          if current.provenance.get(name) and current.provenance[name].source_kind == "USER_EDITED"}
                 result = edit_case(result, edits)
             result = result.model_copy(update={"draft_id": current.draft_id, "created_at": current.created_at,
+                                               "images": current.images,
                                                "revision": current.revision + 1, "updated_at": now()}, deep=True)
             self._write(self.folder(base.draft_id) / "draft.json", result.model_dump())
             return result

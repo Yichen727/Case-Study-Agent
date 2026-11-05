@@ -8,12 +8,13 @@ from zipfile import ZipFile
 from lxml import etree as E
 
 from app import config
-from app.generation.models import Content
+from app.generation.models import Content, DraftImage
+from app.generation.images import images_hash
 from app.generation.template import fill_template, TemplateError, NS, SLIDE_PART
 from app.ingestion.validation import validate_pptx
 from app.ingestion.errors import IngestionError
 
-ENGINE_VERSION = "generated-case-v2-section-spacing"
+ENGINE_VERSION = "generated-case-v4-images"
 ERROR_MESSAGES = {
     "CASE_EXPORT_INCOMPLETE": "Add a title and at least one body section before generating the slide.",
     "CASE_EXPORT_BODY_TOO_LONG": "Please shorten Brief, Creative and Impact to fit the slide before exporting.",
@@ -21,6 +22,7 @@ ERROR_MESSAGES = {
     "CASE_TEMPLATE_INVALID": "The single-case template is missing or unsupported. Restore it in assets/templates.",
     "CASE_TEMPLATE_CHANGED": "The single-case template changed during generation. Generate the slide again.",
     "CASE_EXPORT_FAILED": "The slide could not be generated. Your saved draft is retained; please try again.",
+    "CASE_IMAGE_MISSING": "A saved image is missing or has changed. Remove it and upload it again before exporting.",
 }
 
 
@@ -47,9 +49,11 @@ def prepare_generated_export(draft):
         raise GeneratedExportError("CASE_EXPORT_INCOMPLETE")
     if content.body_words > 250:
         raise GeneratedExportError("CASE_EXPORT_BODY_TOO_LONG")
-    if len(content.title) > 40:
+    if len(content.export_title) > 40:
         raise GeneratedExportError("CASE_EXPORT_TITLE_TOO_LONG")
-    plan = {"draft_id": draft.draft_id, "revision": draft.revision, "content": content.model_dump(),
+    plan = {"draft_id": draft.draft_id, "revision": draft.revision, "request_count": draft.request_count,
+            "content": content.model_dump(),
+            "images": [image.model_dump() for image in draft.images], "images_hash": images_hash(draft.images),
             "content_hash": content_hash(content), "template_sha256": template_hash(), "engine_version": ENGINE_VERSION}
     plan["cache_key"] = sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
     return plan
@@ -64,12 +68,22 @@ def export_generated_case(plan, store):
     folder = store.folder(plan["draft_id"]) / "exports"
     output = folder / f"{plan['cache_key']}.pptx"
     temporary = folder / f".{uuid4().hex}.pptx"
-    summary = {key: plan[key] for key in ("draft_id", "revision", "cache_key", "content_hash", "template_sha256", "engine_version")}
+    summary = {key: plan[key] for key in ("draft_id", "revision", "request_count", "cache_key", "content_hash", "images_hash", "template_sha256", "engine_version")}
     summary.update(output_path=str(output), slide_count=1)
     try:
         if not output.is_file():
             content = Content(**plan["content"])
-            fill_template(content, temporary, remove_thumbnail=True)
+            image_data = []
+            for value in plan["images"]:
+                image = DraftImage.model_validate(value)
+                try:
+                    data = store.image_path(plan["draft_id"], image).read_bytes()
+                except OSError:
+                    raise GeneratedExportError("CASE_IMAGE_MISSING") from None
+                if sha256(data).hexdigest() != image.sha256:
+                    raise GeneratedExportError("CASE_IMAGE_MISSING")
+                image_data.append(data)
+            fill_template(content, temporary, remove_thumbnail=True, images=image_data)
             validate_pptx(temporary)
             with ZipFile(temporary) as package:
                 presentation = E.fromstring(package.read("ppt/presentation.xml"))
@@ -77,6 +91,11 @@ def export_generated_case(plan, store):
                 if len(presentation.findall("p:sldIdLst/p:sldId", NS)) != 1:
                     raise GeneratedExportError("CASE_EXPORT_FAILED")
                 shapes = {s.find("p:nvSpPr/p:cNvPr", NS).get("name"): s for s in root.findall("p:cSld/p:spTree/p:sp", NS)}
+                actual_title = "".join(shapes["TITLE"].xpath(".//a:t/text()", namespaces=NS))
+                if actual_title != content.export_title:
+                    raise GeneratedExportError("CASE_EXPORT_FAILED")
+                if len(root.findall(".//p:pic", NS)) != len(image_data):
+                    raise GeneratedExportError("CASE_EXPORT_FAILED")
                 paragraphs = shapes["BODY COPY"].findall("p:txBody/a:p", NS)
                 for index, name in enumerate(("brief", "creative", "impact")):
                     actual = "".join(paragraphs[index * 2 + 1].xpath(".//a:t/text()", namespaces=NS))

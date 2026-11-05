@@ -50,6 +50,10 @@ class Content(BaseModel):
         return sum(word_count(getattr(self, name)) for name in BODY_FIELDS)
 
     @property
+    def export_title(self):
+        return (self.title or "").upper()
+
+    @property
     def missing_fields(self):
         return [name for name in CASE_FIELDS if getattr(self, name) is None]
 
@@ -79,9 +83,22 @@ class Provenance(BaseModel):
     evidence: list[str] = Field(default_factory=list)
 
 
+class DraftImage(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    filename: str = Field(min_length=1, max_length=200)
+    format: Literal["PNG", "JPEG"]
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+
+    @property
+    def extension(self):
+        return "png" if self.format == "PNG" else "jpg"
+
+
 class Draft(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 2
+    schema_version: int = 3
     draft_id: str = Field(default_factory=lambda: uuid4().hex)
     revision: int = 1
     created_at: str = Field(default_factory=now)
@@ -92,6 +109,7 @@ class Draft(BaseModel):
     follow_ups: list[Annotated[str, Field(max_length=6000)]] = Field(default_factory=list)
     details_skipped: bool = False
     content: Content = Field(default_factory=Content)
+    images: list[DraftImage] = Field(default_factory=list, max_length=4)
     provenance: dict[CaseField, Provenance] = Field(default_factory=dict)
     project_stage: ProjectStage = "UNKNOWN"
     unavailable_fields: list[CaseField] = Field(default_factory=list)
@@ -107,7 +125,7 @@ class Draft(BaseModel):
         # clarification_used flag as a permanent conversation lock.
         if self.clarification and not self.follow_ups:
             self.follow_ups = [self.clarification]
-        self.schema_version = 2
+        self.schema_version = 3
         return self
 
     @property

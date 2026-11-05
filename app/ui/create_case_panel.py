@@ -1,4 +1,5 @@
 """One new-case editor; network and PPTX work run through the existing worker."""
+from base64 import b64encode
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -6,6 +7,7 @@ import streamlit as st
 
 from app.config import get_ai_settings
 from app.generation.models import CASE_FIELDS, Content, clean_text
+from app.generation.images import CaseImageError, images_hash, prepare_images
 from app.generation.storage import DraftStorageError, DraftChangedError
 from app.services.case_generation import GenerationError, ERROR_MESSAGES as GENERATION_ERRORS
 from app.services.task_service import TaskQueueFull
@@ -69,6 +71,8 @@ def _download_path(manager, draft, content, dirty):
     except GeneratedExportError:
         return None, True
     stale = (dirty or record["content_hash"] != content_hash(content)
+             or record.get("request_count") != draft.request_count
+             or record.get("images_hash") != images_hash(draft.images)
              or record["engine_version"] != ENGINE_VERSION or record["template_sha256"] != current_template_hash)
     if stale or candidate.parent != manager.drafts.folder(draft.draft_id) / "exports" or not candidate.is_file():
         return None, True
@@ -76,8 +80,54 @@ def _download_path(manager, draft, content, dirty):
 
 
 def _clear_case_buffers():
-    for key in ("_case_editor", "_create_description", "_create_reply", "_create_reply_round", "create_description"):
+    for key in ("_case_editor", "_create_description", "_create_reply", "_create_reply_round", "create_description",
+                "_case_pending_images", "_case_image_error"):
         st.session_state.pop(key, None)
+    st.session_state["_case_image_epoch"] = st.session_state.get("_case_image_epoch", 0) + 1
+
+
+def _render_images(manager, draft):
+    pending = st.session_state.get("_case_pending_images", [])
+    images = draft.images if draft else [image.metadata for image in pending]
+    scope = draft.draft_id if draft else "new"
+    epoch = st.session_state.get("_case_image_epoch", 0)
+    if error := st.session_state.pop("_case_image_error", None):
+        st.error(error)
+    uploads = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"], accept_multiple_files=True,
+                               max_upload_size=10, key=f"create-images:{scope}:{epoch}", disabled=len(images) >= 4,
+                               help="Optional: up to four images, in the numbered order below. PNG/JPEG, up to 10 MB each.")
+    if uploads:
+        try:
+            prepared = prepare_images([(upload.name, upload.getvalue()) for upload in uploads], existing_count=len(images))
+            if draft:
+                manager.drafts.add_images(draft.draft_id, prepared)
+            else:
+                st.session_state["_case_pending_images"] = [*pending, *prepared]
+        except (CaseImageError, DraftStorageError) as exc:
+            st.session_state["_case_image_error"] = str(exc)
+        st.session_state["_case_image_epoch"] = epoch + 1
+        st.rerun()
+    if not images:
+        return
+    columns = st.columns(4)
+    for index, image in enumerate(images):
+        with columns[index]:
+            try:
+                preview = (manager.drafts.image_path(draft.draft_id, image, preview=True).read_bytes()
+                           if draft else pending[index].preview)
+            except OSError:
+                st.caption("Preview unavailable. Remove and upload this image again.")
+            else:
+                # Small inline previews survive navigation without temporary media URLs.
+                st.image("data:image/png;base64," + b64encode(preview).decode("ascii"))
+            st.caption(f"Image {index + 1}: {image.filename}")
+            if st.button("×", key=f"create-image-remove:{scope}:{index}", help="Remove this image"):
+                if draft:
+                    manager.drafts.remove_image(draft.draft_id, index)
+                else:
+                    st.session_state["_case_pending_images"] = [value for number, value in enumerate(pending) if number != index]
+                st.rerun()
+    st.caption("Images fill positions 1–4 in this order, centred and cropped to fit. Empty positions stay blank.")
 
 
 def _render_history(manager, owner, current):
@@ -111,13 +161,13 @@ def _render_history(manager, owner, current):
                         st.rerun()
                     opened.caption(f"{entry['client']} · {entry['updated_at'][:19].replace('T', ' ')} UTC")
                     if deleted.button("×", key=f"history-delete:{draft_id}", type="tertiary", disabled=draft_id in active_ids,
-                                      help="Delete this draft and its generated PPTX files. Processing drafts cannot be deleted."):
+                                      help="Delete this draft, attached images and generated PPTX files. Processing drafts cannot be deleted."):
                         manager.delete_case_draft(draft_id)
                         if current and current.draft_id == draft_id:
                             _clear_case_buffers()
                         st.session_state["_case_notice"] = "Draft and its generated files deleted."
                         st.rerun()
-        st.caption("Click a title to open. × permanently deletes the draft and its local generated files.")
+        st.caption("Click a title to open. × permanently deletes the draft, its images and local generated files.")
 
 
 def _render(manager, owner):
@@ -132,7 +182,7 @@ def _render(manager, owner):
             manager.drafts.start_new()
             _clear_case_buffers()
             st.rerun()
-    st.caption("Draft an English case from your project notes. Missing facts stay blank; images and video are left empty.")
+    st.caption("Draft an English case from your project notes. Missing facts stay blank; add up to four images if needed.")
     if notice := st.session_state.pop("_case_notice", None):
         st.success(notice)
     settings = get_ai_settings()
@@ -146,11 +196,17 @@ def _render(manager, owner):
         description = st.text_area("Describe your project", key="create_description", height=200, max_chars=12000,
                                    on_change=_remember_input, args=("create_description", "_create_description"), disabled=busy,
                                    placeholder="Who was the client? What was the challenge, creative approach and actual outcome?")
+        st.session_state["_create_description"] = description
+        _render_images(manager, draft)
         if st.button("Create draft", key="create-submit", type="primary", disabled=busy or not settings.api_key):
             if not description.strip():
                 st.warning("Describe your project before creating a draft.")
                 return
-            draft = manager.drafts.create(description.strip())
+            if draft:
+                draft = manager.drafts.update_description(draft.draft_id, description.strip())
+            else:
+                draft = manager.drafts.create(description.strip(), st.session_state.get("_case_pending_images", []))
+                st.session_state.pop("_case_pending_images", None)
             manager.submit_case_generation(draft.draft_id, owner=owner)
             st.rerun()
         if busy:
@@ -167,6 +223,7 @@ def _render(manager, owner):
             st.caption(f"Showing the latest 5 of {len(draft.follow_ups)} additions. All additions are saved with the draft.")
         for message in draft.follow_ups[-5:]:
             st.text(message)
+    _render_images(manager, draft)
     if visible_draft.clarification_question:
         with st.chat_message("assistant"):
             st.write(visible_draft.clarification_question)
@@ -204,6 +261,8 @@ def _render(manager, owner):
 
     st.text_input("Title", key=f"create:{draft.draft_id}:title", max_chars=160, on_change=_capture_edit,
                   args=("title", f"create:{draft.draft_id}:title"))
+    if content.title:
+        st.caption(f"Slide title: {content.export_title}")
     client, services, pillar = st.columns([1, 2, 1])
     for container, name in ((client, "client"), (services, "services"), (pillar, "pillar")):
         with container:
@@ -218,14 +277,19 @@ def _render(manager, owner):
     st.caption("Client and Services are saved with the draft only.")
     if content.body_words > 250:
         st.warning("The text is too long for this slide. Please shorten it before exporting.")
-    if content.title and len(content.title) > 40:
+    if len(content.export_title) > 40:
         st.warning("The title is too long for this layout. Please shorten it.")
     exporting = manager.case_task(draft.draft_id, owner, kind="CASE_EXPORT", active_only=True)
     path, stale = _download_path(manager, draft, content, bool(editor["dirty"]))
-    save, generate, download = st.columns(3)
+    save, retry, generate, download = st.columns(4)
     if save.button("Save draft", key="create-save"):
         _save_editor(manager, draft, editor)
         st.session_state["_case_notice"] = "Draft saved."
+        st.rerun()
+    if retry.button("Retry", key="create-retry", disabled=busy or bool(exporting) or not settings.api_key,
+                    help="Regenerate AI-written text. Manual edits and images are kept."):
+        _save_editor(manager, draft, editor)
+        manager.submit_case_generation(draft.draft_id, owner=owner, retry=True)
         st.rerun()
     if generate.button("Generate PPTX", key="create-generate-pptx", type="primary", disabled=busy or bool(exporting)):
         _save_editor(manager, draft, editor)
@@ -249,7 +313,7 @@ def render_create_case(manager, owner):
         _render(manager, owner)
     except TaskQueueFull as exc:
         st.warning(str(exc))
-    except (GenerationError, DraftStorageError, DraftChangedError, GeneratedExportError) as exc:
+    except (GenerationError, DraftStorageError, DraftChangedError, GeneratedExportError, CaseImageError) as exc:
         st.error(str(exc))
     except ValidationError:
         st.error("Check the draft field lengths. Your previous saved draft is retained.")

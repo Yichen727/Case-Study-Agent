@@ -114,20 +114,24 @@ Retries apply to the selected case's entire source deck and preserve manual corr
 
 ## 5. Create a new case
 
-1. Open **Create case**, describe the client, project background, creative work and actual results, then click **Create draft**.
+1. Open **Create case** and describe the client, project background, creative work and actual results. Optionally use **Upload Image** below the description to add up to four PNG/JPEG images (10 MB each), then click **Create draft**.
 2. **Additional details** stays available for further facts or wording refinements, with no conversation-round limit. Missing information or a body under 120 words prompts you to add detail; **Skip for now** dismisses that prompt without closing the input. Unavailable facts stay blank; planned goals are not presented as achieved results.
 3. Check and edit the seven fields. Brief, Creative and Impact share a **120–250-word** range with no fixed section proportions. Short drafts are allowed and marked as insufficient information.
-4. Click **Save draft** to keep edits, or **Generate PPTX** to save and confirm the current wording, then **Download PPTX**. Shorten titles to 40 characters or fewer and body text to 250 words or fewer before export.
+4. Click **Save draft** to keep edits, or **Generate PPTX** to save and confirm the current wording, then **Download PPTX**. Slide titles are exported in uppercase; the **Slide title** preview shows the final text. Keep that title to 40 characters or fewer and body text to 250 words or fewer before export.
 
-This produces **one editable slide** using `assets/templates/Single Case Template.pptx`. Client and Services are saved with the draft but do not appear on the slide. Images and video stay empty. Check the wording and slide in PowerPoint before sharing.
+This produces **one editable slide** using `assets/templates/Single Case Template.pptx`. Client and Services are saved with the draft but do not appear on the slide. Images fill positions 1–4 in the displayed order, with centred cropping and no stretching; unused positions stay blank. Video embedding is not supported. Check the wording and slide in PowerPoint before sharing.
+
+Use **Retry** after a draft is generated to request fresh AI wording from the same project facts and submitted additions. Manual field edits and attached images are kept. A failed retry leaves the saved draft unchanged; after a successful retry, generate the PPTX again.
+
+You can add or remove images after generation. Click an image's **×** to remove it; remove and upload again to change the order or replace a picture. Changes are saved with the draft and require a new **Generate PPTX**. Images are processed locally and are not sent to the text model. Very large images (over 20 million pixels) should be resized before upload.
 
 The latest saved draft is restored when you reopen the app. Edits survive tab changes within the current session; use Save draft or Generate PPTX to preserve them after a refresh. After editing, generate again to enable a current download. **Start new case** opens a blank input and keeps earlier drafts.
 
-Click the **History** icon beside **Create case** to view saved drafts by title, Client and last saved time. Click a title to save current field edits and open that draft without an AI request. Each entry's **×** permanently removes that draft and its local generated PPTX files; deletion is disabled while the draft is being processed.
+Click the **History** icon beside **Create case** to view saved drafts by title, Client and last saved time. Click a title to save current field edits and open that draft with its saved images without an AI request. Each entry's **×** permanently removes that draft, attached images and local generated PPTX files; deletion is disabled while the draft is being processed.
 
 New drafts and their slides are stored in `data/generated_cases` and retained by **Clear finished tasks**. They are separate from the case library and cannot yet be searched or combined with existing slides.
 
-Each submitted message makes one AI request. Skip, save, navigation and PPTX generation make none. Submitted additions are saved with the draft; older drafts can also continue the conversation.
+Each submitted message or **Retry** makes one AI request. Skip, save, image upload/removal, navigation and PPTX generation make none. Submitted additions are saved with the draft; older drafts can also continue the conversation.
 
 ## Common issues
 
