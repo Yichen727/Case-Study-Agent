@@ -125,6 +125,10 @@ Use **Retry** after a draft is generated to request fresh AI wording from the sa
 
 You can add or remove images after generation. Click an image's **×** to remove it; remove and upload again to change the order or replace a picture. Changes are saved with the draft and require a new **Generate PPTX**. Images are processed locally and are not sent to the text model. Very large images (over 20 million pixels) should be resized before upload.
 
+Website URLs in your description or submitted additions appear under **Optional link**. The first is selected automatically; choose another or **No link**. **Link type** controls the footer label: **Website → READ MORE HERE.**, **Video → WATCH VIDEO HERE.** YouTube and Vimeo links are recognised automatically; you can adjust the type for other sites. The app does not open or read these pages.
+
+Link choices are saved locally and retained by Retry and History. After changing a link or its type, generate the PPTX again. The slide contains one clickable footer link; the URL and label do not count towards the body word limit.
+
 The latest saved draft is restored when you reopen the app. Edits survive tab changes within the current session; use Save draft or Generate PPTX to preserve them after a refresh. After editing, generate again to enable a current download. **Start new case** opens a blank input and keeps earlier drafts.
 
 Click the **History** icon beside **Create case** to view saved drafts by title, Client and last saved time. Click a title to save current field edits and open that draft with its saved images without an AI request. Each entry's **×** permanently removes that draft, attached images and local generated PPTX files; deletion is disabled while the draft is being processed.

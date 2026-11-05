@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from app.generation.links import DraftLink, extract_links, merge_links
 
 CASE_FIELDS = ("title", "client", "services", "pillar", "brief", "creative", "impact")
 BODY_FIELDS = ("brief", "creative", "impact")
@@ -98,7 +99,7 @@ class DraftImage(BaseModel):
 
 class Draft(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 3
+    schema_version: int = 4
     draft_id: str = Field(default_factory=lambda: uuid4().hex)
     revision: int = 1
     created_at: str = Field(default_factory=now)
@@ -110,6 +111,9 @@ class Draft(BaseModel):
     details_skipped: bool = False
     content: Content = Field(default_factory=Content)
     images: list[DraftImage] = Field(default_factory=list, max_length=4)
+    links: list[DraftLink] = Field(default_factory=list)
+    selected_link_url: str | None = None
+    link_selection_set: bool = False
     provenance: dict[CaseField, Provenance] = Field(default_factory=dict)
     project_stage: ProjectStage = "UNKNOWN"
     unavailable_fields: list[CaseField] = Field(default_factory=list)
@@ -119,14 +123,31 @@ class Draft(BaseModel):
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
 
+    @model_validator(mode="before")
+    @classmethod
+    def discover_supplied_links(cls, value):
+        if isinstance(value, dict) and "links" not in value:
+            links = extract_links(value.get("original_description"))
+            replies = value.get("follow_ups") or ([value["clarification"]] if value.get("clarification") else [])
+            for index, reply in enumerate(replies):
+                links = merge_links(links, extract_links(reply, source="FOLLOW_UP", source_index=index))
+            value = {**value, "links": links}
+            if "selected_link_url" not in value:
+                value["selected_link_url"] = links[0].url if links else None
+        return value
+
     @model_validator(mode="after")
     def restore_legacy_reply(self):
         # Older files store a single reply. Retain it without treating the old
         # clarification_used flag as a permanent conversation lock.
         if self.clarification and not self.follow_ups:
             self.follow_ups = [self.clarification]
-        self.schema_version = 3
+        self.schema_version = 4
         return self
+
+    @property
+    def selected_link(self):
+        return next((link for link in self.links if link.url == self.selected_link_url), None)
 
     @property
     def clarification_fields(self):

@@ -10,11 +10,12 @@ from lxml import etree as E
 from app import config
 from app.generation.models import Content, DraftImage
 from app.generation.images import images_hash
+from app.generation.links import DraftLink, link_hash
 from app.generation.template import fill_template, TemplateError, NS, SLIDE_PART
 from app.ingestion.validation import validate_pptx
 from app.ingestion.errors import IngestionError
 
-ENGINE_VERSION = "generated-case-v4-images"
+ENGINE_VERSION = "generated-case-v5-links"
 ERROR_MESSAGES = {
     "CASE_EXPORT_INCOMPLETE": "Add a title and at least one body section before generating the slide.",
     "CASE_EXPORT_BODY_TOO_LONG": "Please shorten Brief, Creative and Impact to fit the slide before exporting.",
@@ -54,6 +55,8 @@ def prepare_generated_export(draft):
     plan = {"draft_id": draft.draft_id, "revision": draft.revision, "request_count": draft.request_count,
             "content": content.model_dump(),
             "images": [image.model_dump() for image in draft.images], "images_hash": images_hash(draft.images),
+            "link": draft.selected_link.model_dump() if draft.selected_link else None,
+            "link_hash": link_hash(draft.selected_link),
             "content_hash": content_hash(content), "template_sha256": template_hash(), "engine_version": ENGINE_VERSION}
     plan["cache_key"] = sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
     return plan
@@ -68,7 +71,7 @@ def export_generated_case(plan, store):
     folder = store.folder(plan["draft_id"]) / "exports"
     output = folder / f"{plan['cache_key']}.pptx"
     temporary = folder / f".{uuid4().hex}.pptx"
-    summary = {key: plan[key] for key in ("draft_id", "revision", "request_count", "cache_key", "content_hash", "images_hash", "template_sha256", "engine_version")}
+    summary = {key: plan[key] for key in ("draft_id", "revision", "request_count", "cache_key", "content_hash", "images_hash", "link_hash", "template_sha256", "engine_version")}
     summary.update(output_path=str(output), slide_count=1)
     try:
         if not output.is_file():
@@ -83,7 +86,8 @@ def export_generated_case(plan, store):
                 if sha256(data).hexdigest() != image.sha256:
                     raise GeneratedExportError("CASE_IMAGE_MISSING")
                 image_data.append(data)
-            fill_template(content, temporary, remove_thumbnail=True, images=image_data)
+            link = DraftLink.model_validate(plan["link"]) if plan["link"] else None
+            fill_template(content, temporary, remove_thumbnail=True, images=image_data, link=link)
             validate_pptx(temporary)
             with ZipFile(temporary) as package:
                 presentation = E.fromstring(package.read("ppt/presentation.xml"))
@@ -101,6 +105,18 @@ def export_generated_case(plan, store):
                     actual = "".join(paragraphs[index * 2 + 1].xpath(".//a:t/text()", namespaces=NS))
                     if actual != (getattr(content, name) or ""):
                         raise GeneratedExportError("CASE_EXPORT_FAILED")
+                hyperlink_relationships = [relationship for relationship in E.fromstring(package.read(
+                    "ppt/slides/_rels/slide1.xml.rels")) if relationship.get("Type", "").endswith("/hyperlink")]
+                clicks = root.findall(".//a:hlinkClick", NS)
+                if link:
+                    label = "".join(paragraphs[-1].xpath(".//a:t/text()", namespaces=NS))
+                    if (len(paragraphs) != 7 or label != link.label or len(clicks) != 1
+                            or len(hyperlink_relationships) != 1 or hyperlink_relationships[0].get("Target") != link.url
+                            or clicks[0].get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+                            != hyperlink_relationships[0].get("Id")):
+                        raise GeneratedExportError("CASE_EXPORT_FAILED")
+                elif len(paragraphs) != 6 or clicks or hyperlink_relationships:
+                    raise GeneratedExportError("CASE_EXPORT_FAILED")
             if template_hash() != plan["template_sha256"]:
                 raise GeneratedExportError("CASE_TEMPLATE_CHANGED")
             temporary.replace(output)

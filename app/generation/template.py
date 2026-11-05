@@ -10,6 +10,7 @@ from PIL import Image, UnidentifiedImageError
 
 from app import config
 from app.generation.models import Content
+from app.generation.links import DraftLink
 
 NS = {"p": "http://schemas.openxmlformats.org/presentationml/2006/main",
       "a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
@@ -150,7 +151,32 @@ def _add_images(root, relationships, images):
     return media
 
 
-def fill_template(content: Content, output_path, *, template_path=None, remove_thumbnail=False, images=()):
+def _add_link(body, paragraphs, relationships, link: DraftLink | None):
+    if link is None:
+        return
+    paragraph = deepcopy(next(p for p in paragraphs if all(label in _text(p) for label in LINK_LABELS)))
+    runs = paragraph.findall("a:r", NS)
+    chosen = next(run for run in runs if _text(run) in {link.label, link.label.rstrip(".")})
+    for run in runs:
+        if run is not chosen:
+            paragraph.remove(run)
+    chosen.find("a:t", NS).text = link.label
+    properties = chosen.find("a:rPr", NS)
+    for old in properties.findall("a:hlinkClick", NS) + properties.findall("a:hlinkMouseOver", NS):
+        properties.remove(old)
+    ids = {relationship.get("Id") for relationship in relationships}
+    index = 1
+    while f"rId{index}" in ids:
+        index += 1
+    relationship_id = f"rId{index}"
+    E.SubElement(properties, f"{{{NS['a']}}}hlinkClick", {f"{{{REL_NS}}}id": relationship_id})
+    E.SubElement(relationships, f"{{{PACKAGE_REL_NS}}}Relationship", Id=relationship_id,
+                 Type=f"{REL_NS}/hyperlink", Target=link.url, TargetMode="External")
+    _spacing(paragraph, 14, before=12)
+    body.append(paragraph)
+
+
+def fill_template(content: Content, output_path, *, template_path=None, remove_thumbnail=False, images=(), link=None):
     """Write one slide, clearing sample text and unused sample hyperlink relationships."""
     template = Path(template_path or config.SINGLE_CASE_TEMPLATE_PATH).resolve()
     output = Path(output_path).resolve()
@@ -187,6 +213,7 @@ def fill_template(content: Content, output_path, *, template_path=None, remove_t
                     text.text = ""
             relationships = _xml(source.read(SLIDE_RELS_PART))
             image_parts = _add_images(root, relationships, images)
+            _add_link(body, paragraphs, relationships, link)
             slide_xml = E.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
             used_relationships = set(root.xpath("//@r:id", namespaces={"r": REL_NS}))
             for relationship in list(relationships):

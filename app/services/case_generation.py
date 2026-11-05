@@ -8,8 +8,9 @@ from pydantic import ValidationError
 
 from app.config import get_ai_settings
 from app.generation.models import CASE_FIELDS, Content, Draft, Provenance, Suggestions, clean_text, now
+from app.generation.links import extract_links, merge_links
 
-PROMPT_VERSION = "new-case-v3-retry"
+PROMPT_VERSION = "new-case-v4-links"
 REQUEST_TIMEOUT_SECONDS = 40
 MAX_OUTPUT_TOKENS = 4500
 MAX_PRIOR_EVIDENCE_CHARS = 8000
@@ -73,6 +74,8 @@ Keep the supported information from the original description when the reply says
 are available. An unexecuted project can still have a title, client, services, pillar, Brief and Creative:
 write its proposed work in future/proposal language, while leaving Impact null.
 Do not browse, use external tools or generate media. Do not add claimed review approval or original-slide evidence.
+The application handles supplied URLs separately. Do not insert URLs or hyperlink labels into the seven fields,
+and do not treat a URL as evidence of what its web page contains.
 """
 
 
@@ -196,7 +199,10 @@ def complete_case(draft, details=None):
                                         "revision": draft.revision + 1, "updated_at": now()}, deep=True)
     details = _input(details, 6000)
     result = _generate(draft, details)
+    links = merge_links(result.links, extract_links(details, source="FOLLOW_UP", source_index=len(draft.follow_ups)))
+    selected_url = result.selected_link_url or (links[0].url if links and not result.link_selection_set else None)
     return result.model_copy(update={"clarification": details, "clarification_used": True, "details_skipped": False,
+                                     "links": links, "selected_link_url": selected_url,
                                      "follow_ups": [*draft.follow_ups, details], "revision": draft.revision + 1,
                                      "updated_at": now()}, deep=True)
 

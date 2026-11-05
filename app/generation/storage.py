@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from app.generation.models import CASE_FIELDS, Draft, now
 from app.generation.images import CaseImageError, MAX_IMAGES
+from app.generation.links import CaseLinkError, extract_links, merge_links
 from app.services.case_generation import edit_case
 
 
@@ -203,8 +204,27 @@ class DraftStore:
                 raise DraftChangedError()
             if description == draft.original_description:
                 return draft
+            links = extract_links(description)
             result = Draft.model_validate({**draft.model_dump(), "original_description": description,
+                                           "links": links, "selected_link_url": links[0].url if links else None,
+                                           "link_selection_set": False,
                                            "revision": draft.revision + 1, "updated_at": now()})
+            self._write(self.folder(draft_id) / "draft.json", result.model_dump())
+            return result
+
+    def choose_link(self, draft_id, url, link_type=None):
+        with self.lock:
+            draft = self.load(draft_id)
+            if url is not None and not any(link.url == url for link in draft.links):
+                raise CaseLinkError("Choose a link supplied in your project notes.")
+            if link_type is not None and link_type not in {"WEB", "VIDEO"}:
+                raise CaseLinkError("Choose Website or Video for the link type.")
+            links = [link.model_copy(update={"link_type": link_type}) if link.url == url and link_type else link
+                     for link in draft.links]
+            if draft.link_selection_set and url == draft.selected_link_url and links == draft.links:
+                return draft
+            result = draft.model_copy(update={"links": links, "selected_link_url": url, "link_selection_set": True,
+                                              "revision": draft.revision + 1, "updated_at": now()}, deep=True)
             self._write(self.folder(draft_id) / "draft.json", result.model_dump())
             return result
 
@@ -228,8 +248,14 @@ class DraftStore:
                 edits = {name: getattr(current.content, name) for name in CASE_FIELDS
                          if current.provenance.get(name) and current.provenance[name].source_kind == "USER_EDITED"}
                 result = edit_case(result, edits)
+            links = merge_links(current.links, result.links)
+            selected_url = current.selected_link_url
+            if selected_url is None and not current.link_selection_set and links:
+                selected_url = links[0].url
             result = result.model_copy(update={"draft_id": current.draft_id, "created_at": current.created_at,
                                                "images": current.images,
+                                               "links": links, "selected_link_url": selected_url,
+                                               "link_selection_set": current.link_selection_set,
                                                "revision": current.revision + 1, "updated_at": now()}, deep=True)
             self._write(self.folder(base.draft_id) / "draft.json", result.model_dump())
             return result

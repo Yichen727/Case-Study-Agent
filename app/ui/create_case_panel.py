@@ -1,5 +1,6 @@
 """One new-case editor; network and PPTX work run through the existing worker."""
 from base64 import b64encode
+from hashlib import sha256
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -8,6 +9,7 @@ import streamlit as st
 from app.config import get_ai_settings
 from app.generation.models import CASE_FIELDS, Content, clean_text
 from app.generation.images import CaseImageError, images_hash, prepare_images
+from app.generation.links import CaseLinkError, extract_links, link_hash
 from app.generation.storage import DraftStorageError, DraftChangedError
 from app.services.case_generation import GenerationError, ERROR_MESSAGES as GENERATION_ERRORS
 from app.services.task_service import TaskQueueFull
@@ -73,6 +75,7 @@ def _download_path(manager, draft, content, dirty):
     stale = (dirty or record["content_hash"] != content_hash(content)
              or record.get("request_count") != draft.request_count
              or record.get("images_hash") != images_hash(draft.images)
+             or record.get("link_hash") != link_hash(draft.selected_link)
              or record["engine_version"] != ENGINE_VERSION or record["template_sha256"] != current_template_hash)
     if stale or candidate.parent != manager.drafts.folder(draft.draft_id) / "exports" or not candidate.is_file():
         return None, True
@@ -81,9 +84,58 @@ def _download_path(manager, draft, content, dirty):
 
 def _clear_case_buffers():
     for key in ("_case_editor", "_create_description", "_create_reply", "_create_reply_round", "create_description",
-                "_case_pending_images", "_case_image_error"):
+                "_case_pending_images", "_case_image_error", "_case_pending_link_choice", "_case_link_error"):
         st.session_state.pop(key, None)
     st.session_state["_case_image_epoch"] = st.session_state.get("_case_image_epoch", 0) + 1
+
+
+def _capture_case_link(manager, draft_id, url_key, type_key, type_change=False):
+    url = st.session_state[url_key]
+    link_type = st.session_state.get(type_key) if type_change else None
+    try:
+        if draft_id:
+            manager.drafts.choose_link(draft_id, url, link_type)
+        else:
+            st.session_state["_case_pending_link_choice"] = {"url": url, "link_type": link_type}
+    except (CaseLinkError, DraftStorageError) as exc:
+        st.session_state["_case_link_error"] = str(exc)
+        st.session_state.pop(url_key, None)
+        st.session_state.pop(type_key, None)
+    if not type_change:
+        st.session_state.pop(type_key, None)
+
+
+def _render_links(manager, draft, description=None):
+    links = draft.links if draft else extract_links(description)
+    urls = [link.url for link in links]
+    pending = st.session_state.get("_case_pending_link_choice")
+    if not draft and pending and pending["url"] is not None and pending["url"] not in urls:
+        st.session_state.pop("_case_pending_link_choice", None)
+        pending = None
+    if error := st.session_state.pop("_case_link_error", None):
+        st.error(error)
+    if not links:
+        return
+    selected = draft.selected_link_url if draft else pending["url"] if pending else urls[0]
+    signature = sha256("\n".join(urls).encode()).hexdigest()[:12]
+    scope = draft.draft_id if draft else "new"
+    url_key, type_key = f"create-link:{scope}:{signature}", f"create-link-type:{scope}:{signature}"
+    if url_key not in st.session_state:
+        st.session_state[url_key] = selected if selected in urls else None
+    picker, kind = st.columns([3, 1])
+    url = picker.selectbox("Optional link", [None, *urls], format_func=lambda value: value or "No link",
+                           key=url_key, on_change=_capture_case_link,
+                           args=(manager, draft.draft_id if draft else None, url_key, type_key))
+    link = next((item for item in links if item.url == url), None)
+    if link:
+        if type_key not in st.session_state:
+            st.session_state[type_key] = (pending.get("link_type") if not draft and pending
+                                           and pending["url"] == url else None) or link.link_type
+        link_type = kind.radio("Link type", ["WEB", "VIDEO"], horizontal=True,
+                               format_func=lambda value: "Website" if value == "WEB" else "Video", key=type_key,
+                               on_change=_capture_case_link,
+                               args=(manager, draft.draft_id if draft else None, url_key, type_key, True))
+        st.caption("Slide label: " + ("WATCH VIDEO HERE." if link_type == "VIDEO" else "READ MORE HERE."))
 
 
 def _render_images(manager, draft):
@@ -197,7 +249,10 @@ def _render(manager, owner):
                                    on_change=_remember_input, args=("create_description", "_create_description"), disabled=busy,
                                    placeholder="Who was the client? What was the challenge, creative approach and actual outcome?")
         st.session_state["_create_description"] = description
+        if draft and not busy and description.strip() != draft.original_description:
+            draft = manager.drafts.update_description(draft.draft_id, description.strip())
         _render_images(manager, draft)
+        _render_links(manager, draft, description)
         if st.button("Create draft", key="create-submit", type="primary", disabled=busy or not settings.api_key):
             if not description.strip():
                 st.warning("Describe your project before creating a draft.")
@@ -207,6 +262,8 @@ def _render(manager, owner):
             else:
                 draft = manager.drafts.create(description.strip(), st.session_state.get("_case_pending_images", []))
                 st.session_state.pop("_case_pending_images", None)
+                if choice := st.session_state.pop("_case_pending_link_choice", None):
+                    draft = manager.drafts.choose_link(draft.draft_id, choice["url"], choice["link_type"])
             manager.submit_case_generation(draft.draft_id, owner=owner)
             st.rerun()
         if busy:
@@ -224,6 +281,7 @@ def _render(manager, owner):
         for message in draft.follow_ups[-5:]:
             st.text(message)
     _render_images(manager, draft)
+    _render_links(manager, draft)
     if visible_draft.clarification_question:
         with st.chat_message("assistant"):
             st.write(visible_draft.clarification_question)
@@ -313,7 +371,7 @@ def render_create_case(manager, owner):
         _render(manager, owner)
     except TaskQueueFull as exc:
         st.warning(str(exc))
-    except (GenerationError, DraftStorageError, DraftChangedError, GeneratedExportError, CaseImageError) as exc:
+    except (GenerationError, DraftStorageError, DraftChangedError, GeneratedExportError, CaseImageError, CaseLinkError) as exc:
         st.error(str(exc))
     except ValidationError:
         st.error("Check the draft field lengths. Your previous saved draft is retained.")
