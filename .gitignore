@@ -12,6 +12,7 @@ data/backups/
 data/incoming/
 data/exports/
 data/generated_cases/
+data/selected_edits/
 evaluation/
 tests/
 PLAN.md

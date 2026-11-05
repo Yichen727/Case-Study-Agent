@@ -13,6 +13,7 @@ from app.export.openxml_export import export_slides, presentation_slide_ids, Sli
 EXPORT_ENGINE_VERSION = "openxml-v3-template"
 TEMPLATE_INSERT_AFTER = 4
 ERROR_MESSAGES = {
+    "EXPORT_EDITED_UNAVAILABLE":"Edited slide export is not available yet. Restore original text to export the original slides.",
     "EXPORT_SELECTION_INVALID":"Select at least one case, without selecting the same case twice.",
     "EXPORT_CASE_MISSING":"A selected case is no longer available. Update the selection and confirm again.",
     "EXPORT_SOURCE_MISSING":"An original presentation snapshot is missing. Re-import the original deck before exporting.",

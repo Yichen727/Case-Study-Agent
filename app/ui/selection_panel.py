@@ -9,6 +9,7 @@ from app.ui.selection_state import (
 )
 from app.ui.selected_case_list import selected_case_list
 from app.ui.export_panel import render_export_panel
+from app.services.selection_editing import SelectionEditError
 
 
 def selection_labels(cases):
@@ -33,7 +34,15 @@ def render_selected_cases(db_path, manager, owner):
         remove_cases(st.session_state,[case_id for case_id in ids if case_id not in names])
         st.warning("Cases no longer in the library were removed from the selection.")
         ids = selected_ids(st.session_state)
-    render_export_panel(db_path,manager,owner,cases)
+    try:
+        workspace = manager.selection_edits.load(owner)
+    except SelectionEditError as exc:
+        st.error(str(exc))
+        return
+    edited = set(ids) & set(workspace.applied)
+    for case_id in edited:
+        names[case_id] += "\nEdited version"
+    render_export_panel(db_path,manager,owner,cases,text_edits_applied=bool(edited))
     if not ids:
         st.info("Choose cases using the checkboxes in Search results.")
         return
@@ -43,7 +52,7 @@ def render_selected_cases(db_path, manager, owner):
     fingerprint = hashlib.sha256("\n".join(items).encode()).hexdigest()[:12]
     revision = st.session_state.get("selection_revision",0)
     # action is a one-shot trigger; a state default would hide incoming events.
-    result = selected_case_list(data={"cases":[{"id":case_id,"label":names[case_id]} for case_id in ids]},
+    result = selected_case_list(data={"cases":[{"id":case_id,"label":label} for case_id,label in zip(ids,items)]},
                                 on_action_change=lambda:None,
                                 key=f"selected-order:{revision}:{fingerprint}")
     if action := result.action:
@@ -51,4 +60,6 @@ def render_selected_cases(db_path, manager, owner):
             remove_cases(st.session_state,[action["case_id"]])
         elif action["type"] == "reorder":
             reorder_cases(st.session_state,action["case_ids"])
+        if workspace.pending or workspace.applied or workspace.active_request:
+            st.rerun()
         st.rerun(scope="fragment")

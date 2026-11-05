@@ -137,6 +137,16 @@ New drafts and their slides are stored in `data/generated_cases` and retained by
 
 Each submitted message or **Retry** makes one AI request. Skip, save, image upload/removal, navigation and PPTX generation make none. Submitted additions are saved with the draft; older drafts can also continue the conversation.
 
+## 6. Edit selected case text
+
+1. In **Selected cases**, enter an **Editing request**, for example: “For all selected cases, remove the section headings and use two paragraphs at about half the current length.” Use **case 2** or **cases 1 and 3** to target selection numbers; otherwise the default is all selected cases. Click **Send request**.
+2. Review **Before / Preview** and the supporting text. You can edit the preview before clicking **Apply changes**, or choose **Discard**. Ambiguous references may prompt one short clarification.
+3. Applied text is marked **Edited version** and saved locally. Further requests start from the applied wording; **Restore original** removes that case's edits. Original presentations, library metadata and search evidence stay unchanged.
+
+**Edited-slide PPTX export is not available in this release.** Applying text changes disables export for those selected cases. Restore their original text to use the existing original-slide export.
+
+Requests use one AI call for a small batch of up to ten slides, subject to a text-size limit. For large requests, specify fewer selection numbers. Slides without a safely editable body, including bodies with inline hyperlinks, are left unchanged with an explanation. After restarting, reselect the same cases to see their saved edits.
+
 ## Common issues
 
 | Issue | What to do |

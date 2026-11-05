@@ -20,9 +20,11 @@ from app.services.task_service import get_task_manager, TaskQueueFull
 from app.ui.review_panel import render_review
 from app.search.embedding_service import index_status
 from app.ui.selection_panel import render_selected_cases
+from app.ui.selection_edit_panel import render_selection_edits
 from app.ui.selection_state import clear_selection, select_case, select_cases, selected_ids
 from app.export.slide_export import export_error_message
 from app.ui.create_case_panel import render_create_case, case_error_message
+from app.services.selection_editing import ERROR_MESSAGES as EDIT_ERRORS, SelectionEditError
 
 PAGE_SIZE = 25
 st.set_page_config(page_title="Case Study Agent", layout="wide")
@@ -208,16 +210,20 @@ with st.sidebar:
                     st.error(export_error_message(job["error_code"]))
                 elif job["kind"] in {"CASE_GENERATE", "CASE_EXPORT"}:
                     st.error(case_error_message(job["error_code"]))
+                elif job["kind"] == "SELECTION_EDIT":
+                    st.error(EDIT_ERRORS.get(job["error_code"], "This text edit could not be completed. Your applied text is retained."))
                 else:
                     st.error("This task could not be completed. Please try again.")
                 if st.button("Retry", key=f"retry:{job['task_id']}"):
                     try:
                         if not manager.retry(job["task_id"],job["owner"]):
-                            st.info("Please upload the file again.")
+                            st.info("Send a new text-editing request." if job["kind"] == "SELECTION_EDIT" else "Please upload the file again.")
                         else:
                             st.rerun()
                     except TaskQueueFull as exc:
                         st.warning(str(exc))
+                    except SelectionEditError as exc:
+                        st.error(str(exc))
         if jobs and st.button("Clear finished tasks"):
             manager.clear_finished(owner)
             st.rerun()
@@ -225,8 +231,10 @@ with st.sidebar:
             st.caption("Clearing finished tasks also removes their generated PPTX files. Original decks are retained.")
         if any(job["kind"] in {"CASE_GENERATE", "CASE_EXPORT"} for job in jobs):
             st.caption("New case drafts and their slides are retained when finished tasks are cleared.")
+        if any(job["kind"] == "SELECTION_EDIT" for job in jobs):
+            st.caption("Applied text edits are retained when finished tasks are cleared.")
         active = any(job["status"] in {"QUEUED", "RUNNING"} for job in jobs)
-        case_states = tuple((job["task_id"], job["status"]) for job in jobs if job["kind"] in {"CASE_GENERATE", "CASE_EXPORT"})
+        case_states = tuple((job["task_id"], job["status"]) for job in jobs if job["kind"] in {"CASE_GENERATE", "CASE_EXPORT", "SELECTION_EDIT"})
         previous_case_states = st.session_state.get("_case_task_states")
         st.session_state["_case_task_states"] = case_states
         case_changed = previous_case_states is not None and case_states != previous_case_states
@@ -333,6 +341,7 @@ if tab_search.open:
 if tab_selected.open:
     with tab_selected:
         render_selected_cases(DB_PATH,manager,owner)
+        render_selection_edits(manager, owner)
 
 if tab_create.open:
     with tab_create:

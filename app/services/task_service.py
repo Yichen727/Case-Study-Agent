@@ -21,6 +21,8 @@ from app.generation.models import Draft
 from app.generation.storage import DraftStore, DraftChangedError, DraftStorageError
 from app.services.case_generation import start_case, complete_case, retry_case, GenerationError
 from app.export.generated_case_export import prepare_generated_export, export_generated_case, GeneratedExportError
+from app.generation.selection_edits import SelectionEditStore
+from app.services.selection_editing import prepare_edit, rewrite_selection, EditPlan, EditResult, SelectionEditError
 
 
 class TaskQueueFull(RuntimeError):
@@ -31,6 +33,7 @@ class TaskManager:
     def __init__(self, db_path, capacity=4):
         self.db_path = Path(db_path).resolve()
         self.drafts = DraftStore(self.db_path.parent)
+        self.selection_edits = SelectionEditStore(self.db_path.parent)
         init_db(self.db_path)
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="case-study")
         self._capacity = BoundedSemaphore(capacity)
@@ -89,6 +92,9 @@ class TaskManager:
         return task_id
 
     def submit_export(self, case_ids, owner="local"):
+        case_ids = tuple(case_ids)
+        if set(case_ids) & set(self.selection_edits.load(owner).applied):
+            raise CaseExportError("EXPORT_EDITED_UNAVAILABLE")
         plan = prepare_export(self.db_path,tuple(case_ids))
         with self._lock:
             with connect(self.db_path) as conn:
@@ -193,6 +199,43 @@ class TaskManager:
             task_id = uuid4().hex
             try:
                 self._create(task_id, "CASE_EXPORT", "New case slide", owner, plan, cache_key=plan["cache_key"])
+            except Exception:
+                self._capacity.release()
+                raise
+            return task_id
+
+    def selection_edit_task(self, owner="local", *, active_only=False):
+        with connect(self.db_path) as conn:
+            sql = "SELECT * FROM tasks WHERE owner=? AND kind='SELECTION_EDIT'"
+            if active_only:
+                sql += " AND status IN ('QUEUED','RUNNING')"
+            row = conn.execute(sql + " ORDER BY rowid DESC LIMIT 1", (owner,)).fetchone()
+            return dict(row) if row else None
+
+    def submit_selection_edit(self, case_ids, prompt, selection_revision, owner="local"):
+        with self._lock:
+            active = self.selection_edit_task(owner, active_only=True)
+            if active:
+                return active["task_id"]
+            workspace = self.selection_edits.load(owner)
+            clarified = bool(workspace.pending and workspace.pending.result.question)
+            if workspace.pending and not clarified:
+                raise TaskQueueFull("Apply or discard the current preview before sending another request.")
+            if clarified:
+                previous = workspace.pending.plan
+                if previous.selection_ids != list(case_ids) or previous.selection_revision != selection_revision:
+                    raise SelectionEditError("EDIT_STALE")
+                prompt = previous.prompt + "\nScope clarification: " + prompt
+            plan = prepare_edit(self.db_path, case_ids, prompt, workspace, selection_revision, clarified=clarified)
+            if plan.local_question:
+                self.selection_edits.begin(owner, plan)
+                self.selection_edits.complete(owner, plan, EditResult(question=plan.local_question))
+                return None
+            self._reserve()
+            task_id = uuid4().hex
+            try:
+                self.selection_edits.begin(owner, plan)
+                self._create(task_id, "SELECTION_EDIT", "Selected case text", owner, plan.model_dump())
             except Exception:
                 self._capacity.release()
                 raise
@@ -303,6 +346,18 @@ class TaskManager:
             elif task["kind"] == "CASE_EXPORT":
                 progress("Preparing your single case slide", 0, 1)
                 summary = export_generated_case(payload, self.drafts)
+            elif task["kind"] == "SELECTION_EDIT":
+                plan = EditPlan.model_validate(payload)
+                workspace = self.selection_edits.load(task["owner"])
+                if workspace.active_request != plan.request_id or workspace.revision != plan.workspace_revision:
+                    summary = {"discarded": True}
+                else:
+                    progress("Rewriting selected slide text", 0, 1)
+                    result = rewrite_selection(plan)
+                    committed = self.selection_edits.complete(task["owner"], plan, result)
+                    summary = {"discarded": not committed, "preview_count": len(result.changes),
+                               "input_tokens": result.input_tokens, "output_tokens": result.output_tokens,
+                               "elapsed_seconds": result.elapsed_seconds}
             else:
                 raise ValueError("Unsupported task kind")
             self._update(task_id, status="SUCCEEDED", stage="Complete", completed=1, total=1,
@@ -310,7 +365,8 @@ class TaskManager:
             self._remove_input(task)
         except Exception as exc:
             code = exc.code if isinstance(exc,(IngestionError,CaseExportError,OriginalSlideExportError,
-                                               GenerationError,DraftStorageError,DraftChangedError,GeneratedExportError)) else "TASK_FAILED"
+                                               GenerationError,DraftStorageError,DraftChangedError,GeneratedExportError,
+                                               SelectionEditError)) else "TASK_FAILED"
             logging.getLogger(__name__).warning("Background task failed: %s", code)
             self._update(task_id, status="FAILED", stage="Could not complete this task", error_code=code)
 
@@ -343,6 +399,15 @@ class TaskManager:
             if not task or task["status"] not in {"FAILED", "INTERRUPTED"}:
                 return False
             payload = json.loads(task["payload_json"])
+            if task["kind"] == "SELECTION_EDIT":
+                plan = EditPlan.model_validate(payload)
+                workspace = self.selection_edits.load(owner)
+                if (workspace.revision != plan.workspace_revision
+                        or workspace.active_request not in {None, plan.request_id}
+                        or workspace.pending and workspace.pending.plan.request_id != plan.request_id
+                        and not (workspace.pending.result.question and workspace.active_request == plan.request_id)):
+                    return False
+                self.selection_edits.begin(owner, plan)
             if task["kind"] == "IMPORT" and not Path(payload["input_path"]).is_file():
                 return False
             self._reserve()

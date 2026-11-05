@@ -15,7 +15,7 @@ def download_bytes(path):
     return Path(path).read_bytes()
 
 
-def render_export_panel(db_path, manager, owner, cases):
+def render_export_panel(db_path, manager, owner, cases, *, text_edits_applied=False):
     """Render inside the selection fragment so ordering changes update export too."""
     snapshot = selected_ids(st.session_state)
     previous_id = st.session_state.get("last_export_task_id")
@@ -30,7 +30,7 @@ def render_export_panel(db_path, manager, owner, cases):
             path = candidate
     generate, download, _ = st.columns([1,1,3])
     with generate:
-        if st.button("Generate PPTX",type="primary",disabled=not snapshot or len(cases)!=len(snapshot) or same_running,
+        if st.button("Generate PPTX",type="primary",disabled=not snapshot or len(cases)!=len(snapshot) or same_running or text_edits_applied,
                      help="Confirms the current order and inserts original case slides after page 4 of the company template."):
             try:
                 task_id = manager.submit_export(export_order_snapshot(st.session_state),owner)
@@ -43,7 +43,10 @@ def render_export_panel(db_path, manager, owner, cases):
     with download:
         st.download_button("Download PPTX",data=(lambda:download_bytes(path)) if path else b"",mime=PPTX_MIME,
                            file_name=f"case-studies-{result['slide_count']}-slides.pptx" if path else "case-studies.pptx",
-                           disabled=path is None,on_click="ignore")
+                           disabled=path is None or text_edits_applied,on_click="ignore")
+    if text_edits_applied:
+        st.info("Edited slide export is not available yet. Restore original text to export the original slides.")
+        return
     st.caption("Your ordered cases are inserted between pages 4 and 5 of the company template.")
     if any(case["review_status"]=="NEEDS_REVIEW" or case["unverified_ai"] for case in cases):
         st.caption("Some selected metadata is incomplete or AI-inferred; the original slides can still be exported.")
