@@ -22,6 +22,7 @@ LABELS = ("BRIEF", "CREATIVE", "IMPACT")
 # Each pair identifies the image rectangle and its separate caption shape.
 IMAGE_SLOTS = (("7", "8"), ("9", "19"), ("12", "18"), ("13", "17"))
 LINK_LABELS = ("READ MORE HERE.", "WATCH VIDEO HERE.")
+LINK_COLOR = "FF0069"
 REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 
@@ -162,6 +163,12 @@ def _add_link(body, paragraphs, relationships, link: DraftLink | None):
             paragraph.remove(run)
     chosen.find("a:t", NS).text = link.label
     properties = chosen.find("a:rPr", NS)
+    fill = properties.find("a:solidFill", NS)
+    fill.clear()
+    E.SubElement(fill, f"{{{NS['a']}}}srgbClr", val=LINK_COLOR)
+    # Keep the template's "use text colour" setting; otherwise PowerPoint
+    # can override the run colour with the theme's hyperlink colour.
+    click = deepcopy(properties.find("a:hlinkClick", NS))
     for old in properties.findall("a:hlinkClick", NS) + properties.findall("a:hlinkMouseOver", NS):
         properties.remove(old)
     ids = {relationship.get("Id") for relationship in relationships}
@@ -169,7 +176,8 @@ def _add_link(body, paragraphs, relationships, link: DraftLink | None):
     while f"rId{index}" in ids:
         index += 1
     relationship_id = f"rId{index}"
-    E.SubElement(properties, f"{{{NS['a']}}}hlinkClick", {f"{{{REL_NS}}}id": relationship_id})
+    click.set(f"{{{REL_NS}}}id", relationship_id)
+    properties.append(click)
     E.SubElement(relationships, f"{{{PACKAGE_REL_NS}}}Relationship", Id=relationship_id,
                  Type=f"{REL_NS}/hyperlink", Target=link.url, TargetMode="External")
     _spacing(paragraph, 14, before=12)
