@@ -2,6 +2,13 @@ from collections import Counter
 import json
 import logging
 from math import ceil
+from pathlib import Path
+import sys
+
+# Cloud executes this nested file directly, without the local launcher's path.
+PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 import streamlit as st
 
