@@ -1,4 +1,4 @@
-"""Build an internal installation ZIP and preserve macOS launcher permissions."""
+"""Package program files and approved templates; exclude all local user workspaces."""
 import argparse
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo

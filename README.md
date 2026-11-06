@@ -94,7 +94,7 @@ The file includes the company template's first four pages, your cases in the cho
 
 If you change the selection or order, generate a new file before downloading. Existing files retain the order used when they were generated.
 
-The export uses the original editable slides. Metadata corrections do not rewrite slide content. Check the downloaded deck in PowerPoint before sharing.
+The export uses original editable slides, with any **applied text edits** replacing only their body area. Metadata corrections do not rewrite slide content. Check the downloaded deck in PowerPoint before sharing.
 
 ## 4. Review missing metadata
 
@@ -143,9 +143,13 @@ Each submitted message or **Retry** makes one AI request. Skip, save, image uplo
 2. Review **Before / Preview** and the supporting text. You can edit the preview before clicking **Apply changes**, or choose **Discard**. Ambiguous references may prompt one short clarification.
 3. Applied text is marked **Edited version** and saved locally. Further requests start from the applied wording; **Restore original** removes that case's edits. Original presentations, library metadata and search evidence stay unchanged.
 
-**Edited-slide PPTX export is not available in this release.** Applying text changes disables export for those selected cases. Restore their original text to use the existing original-slide export.
+Click **Generate PPTX** to export applied text alongside unchanged original slides in the current order. The company template's first four pages come before your cases and its remaining pages come after them. Titles, media, layout, fonts and supported footer links are retained; only the supported body area is replaced. Text stays editable. Long edits may need shortening to fit the original body area; check the result in PowerPoint.
+
+Apply, further changes or **Restore original** require a new **Generate PPTX**. Generation freezes the wording and order at the time you click; changes made while it runs do not alter that file. A result containing an outdated text revision cannot be downloaded as the current version. Restore changes future exports, not files already downloaded. Pending previews are not exported.
 
 Requests use one AI call for a small batch of up to ten slides, subject to a text-size limit. For large requests, specify fewer selection numbers. Slides without a safely editable body, including bodies with inline hyperlinks, are left unchanged with an explanation. After restarting, reselect the same cases to see their saved edits.
+
+Applied text and small derived page XML files are stored in `data/selected_edits`; original source snapshots stay unchanged. PPTX generation is local and makes no AI request. **Clear finished tasks** removes generated selected-case decks while retaining applied edits. Installation ZIPs exclude all local case data, images, drafts and derived pages.
 
 ## Common issues
 

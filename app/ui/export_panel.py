@@ -4,7 +4,8 @@ from pathlib import Path
 
 import streamlit as st
 
-from app.export.slide_export import CaseExportError, EXPORT_ENGINE_VERSION, export_error_message
+from app.export.slide_export import CaseExportError, EXPORT_ENGINE_VERSION, export_error_message, edits_hash
+from app.services.selection_editing import SelectionEditError
 from app.services.task_service import TaskQueueFull
 from app.ui.selection_state import export_order_snapshot, selected_ids
 
@@ -15,50 +16,53 @@ def download_bytes(path):
     return Path(path).read_bytes()
 
 
-def render_export_panel(db_path, manager, owner, cases, *, text_edits_applied=False):
+def render_export_panel(db_path, manager, owner, cases, *, applied=None):
     """Render inside the selection fragment so ordering changes update export too."""
     snapshot = selected_ids(st.session_state)
     previous_id = st.session_state.get("last_export_task_id")
     previous = manager.get_task(previous_id,owner) if previous_id else None
+    applied = applied or {}
+    plan = json.loads(previous["payload_json"]) if previous else None
+    same_edits = bool(plan and plan.get("edit_hash") == edits_hash(plan["case_ids"], applied)
+                      and plan["engine_version"] == EXPORT_ENGINE_VERSION)
     same_running = bool(previous and previous["status"] in {"QUEUED","RUNNING"}
-                        and tuple(json.loads(previous["payload_json"])["case_ids"])==snapshot)
+                        and tuple(plan["case_ids"])==snapshot and same_edits)
     result, path = None, None
     if previous and previous["status"]=="SUCCEEDED":
         result = json.loads(previous["result_json"])
         candidate = Path(result["output_path"]).resolve()
-        if candidate.parent==Path(db_path).resolve().parent / "exports" and candidate.is_file():
+        if same_edits and candidate.parent==Path(db_path).resolve().parent / "exports" and candidate.is_file():
             path = candidate
     generate, download, _ = st.columns([1,1,3])
     with generate:
-        if st.button("Generate PPTX",type="primary",disabled=not snapshot or len(cases)!=len(snapshot) or same_running or text_edits_applied,
-                     help="Confirms the current order and inserts original case slides after page 4 of the company template."):
+        if st.button("Generate PPTX",type="primary",disabled=not snapshot or len(cases)!=len(snapshot) or same_running,
+                     help="Exports the current order and applied text changes after page 4 of the company template."):
             try:
                 task_id = manager.submit_export(export_order_snapshot(st.session_state),owner)
                 st.session_state["last_export_task_id"] = task_id
                 st.rerun()
-            except CaseExportError as exc:
+            except (CaseExportError, SelectionEditError) as exc:
                 st.error(str(exc))
             except TaskQueueFull as exc:
                 st.warning(str(exc))
     with download:
         st.download_button("Download PPTX",data=(lambda:download_bytes(path)) if path else b"",mime=PPTX_MIME,
+                           key=f"selected-download-{previous_id or 'none'}",
                            file_name=f"case-studies-{result['slide_count']}-slides.pptx" if path else "case-studies.pptx",
-                           disabled=path is None or text_edits_applied,on_click="ignore")
-    if text_edits_applied:
-        st.info("Edited slide export is not available yet. Restore original text to export the original slides.")
-        return
+                           disabled=path is None,on_click="ignore")
     st.caption("Your ordered cases are inserted between pages 4 and 5 of the company template.")
+    if any(case_id in applied for case_id in snapshot):
+        st.caption("Applied text replaces only the original body area. Check the edited slides in PowerPoint before sharing.")
     if any(case["review_status"]=="NEEDS_REVIEW" or case["unverified_ai"] for case in cases):
         st.caption("Some selected metadata is incomplete or AI-inferred; the original slides can still be exported.")
 
     if previous is None:
         return
-    plan = json.loads(previous["payload_json"])
     if previous["status"] in {"QUEUED","RUNNING"}:
         st.info("Preparing your presentation in the background. You can keep searching or reviewing cases.")
     elif previous["status"] == "SUCCEEDED":
         if path is None:
-            st.info("This generated file is no longer available. Generate it again.")
+            st.info("Text changes or the export format may have changed, or the file is unavailable. Generate PPTX again.")
             return
         different_selection = tuple(plan["case_ids"])!=selected_ids(st.session_state)
         if different_selection:

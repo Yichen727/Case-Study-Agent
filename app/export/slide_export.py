@@ -1,19 +1,22 @@
-"""Resolve ordered cases once, then export their immutable original snapshots."""
+"""Freeze selected cases and applied body revisions, then copy their source packages."""
 import hashlib
 import json
 from pathlib import Path
-from zipfile import BadZipFile
+from zipfile import BadZipFile, ZipFile
+from contextlib import ExitStack
 
 from lxml.etree import XMLSyntaxError
 
 from app import config
 from app.db.repository import connect
-from app.export.openxml_export import export_slides, presentation_slide_ids, SlideReference
+from app.export.openxml_export import export_slides, presentation_slide_ids, SlideReference, _Source
+from app.export.edited_body import replace_body, save_derived_page
 
-EXPORT_ENGINE_VERSION = "openxml-v3-template"
+EXPORT_ENGINE_VERSION = "openxml-v4-edited-body"
 TEMPLATE_INSERT_AFTER = 4
 ERROR_MESSAGES = {
-    "EXPORT_EDITED_UNAVAILABLE":"Edited slide export is not available yet. Restore original text to export the original slides.",
+    "EXPORT_EDIT_INVALID":"An applied edit no longer matches its original slide. Restore original and submit a new editing request.",
+    "EXPORT_EDIT_UNSUPPORTED":"This slide has no safely editable body or contains inline links. Restore original to export it unchanged.",
     "EXPORT_SELECTION_INVALID":"Select at least one case, without selecting the same case twice.",
     "EXPORT_CASE_MISSING":"A selected case is no longer available. Update the selection and confirm again.",
     "EXPORT_SOURCE_MISSING":"An original presentation snapshot is missing. Re-import the original deck before exporting.",
@@ -59,7 +62,21 @@ def _template_plan():
     return {"path":str(path),"sha256":fingerprint,"slide_ids":slide_ids}
 
 
-def prepare_export(db_path, case_ids):
+def selected_edits(case_ids, applied):
+    """Freeze only selected applied revisions; pending previews never enter an export."""
+    return {case_id: {"revision": applied[case_id].revision,
+            "original_slide_id": applied[case_id].slide.original_slide_id,
+            "source_sha256": applied[case_id].slide.source_sha256,
+            "body_shape_id": applied[case_id].slide.body_shape_id,
+            "paragraphs": [p.model_dump() for p in applied[case_id].paragraphs]}
+            for case_id in case_ids if case_id in applied}
+
+
+def edits_hash(case_ids, applied):
+    return hashlib.sha256(json.dumps(selected_edits(case_ids, applied), sort_keys=True).encode()).hexdigest()
+
+
+def prepare_export(db_path, case_ids, applied=None):
     ids = list(case_ids)
     if not ids or len(set(ids))!=len(ids):
         raise CaseExportError("EXPORT_SELECTION_INVALID")
@@ -76,6 +93,7 @@ def prepare_export(db_path, case_ids):
     cases = {row["case_id"]:dict(row) for row in rows}
     if len(cases)!=len(ids):
         raise CaseExportError("EXPORT_CASE_MISSING")
+    edits = selected_edits(ids, applied or {})
     slides,labels = [],[]
     folder = Path(db_path).resolve().parent / "uploads"
     for case_id in ids:
@@ -86,18 +104,24 @@ def prepare_export(db_path, case_ids):
         path = Path(snapshot).resolve()
         if path.parent!=folder or not path.is_file():
             raise CaseExportError("EXPORT_SOURCE_MISSING")
+        edit = edits.get(case_id)
+        if edit and (edit["source_sha256"] != case["content_sha256"]
+                     or edit["original_slide_id"] != case["original_slide_id"]
+                     or not edit["body_shape_id"] or not edit["paragraphs"]):
+            raise CaseExportError("EXPORT_EDIT_INVALID")
         slides.append({"path":str(path),"slide_id":case["original_slide_id"],"sha256":case["content_sha256"]})
         labels.append({key:case[key] for key in ("title","source_deck","slide_numbers","review_status","unverified_ai")})
     template = _template_plan()
     identity = {"case_ids":ids,"slides":[(slide["slide_id"],slide["sha256"]) for slide in slides],
                 "engine_version":EXPORT_ENGINE_VERSION,"template_sha256":template["sha256"],
-                "insert_after":TEMPLATE_INSERT_AFTER}
+                "insert_after":TEMPLATE_INSERT_AFTER, "edits": edits, "edit_hash": edits_hash(ids, applied or {})}
     key = hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest()
     return {**identity,"slides":slides,"cases":labels,"template":template,
             "slide_count":len(slides)+len(template["slide_ids"]),"cache_key":key}
 
 
 def export_original_slides(plan, output_path, *, progress=None):
+    """Export frozen originals and body-only variants through the same OOXML copier."""
     if plan["engine_version"]!=EXPORT_ENGINE_VERSION:
         raise CaseExportError("EXPORT_VERSION_CHANGED")
     template = plan["template"]
@@ -118,8 +142,22 @@ def export_original_slides(plan, output_path, *, progress=None):
         if actual!=expected:
             raise CaseExportError("EXPORT_SOURCE_CHANGED")
     if progress:
-        progress("Exporting original slides",0,len(plan["slides"]))
-    cases = [SlideReference(Path(slide["path"]),slide["slide_id"]) for slide in plan["slides"]]
+        progress("Exporting selected slides",0,len(plan["slides"]))
+    cases = []
+    with ExitStack() as stack:
+        sources = {}
+        for case_id, slide in zip(plan["case_ids"], plan["slides"]):
+            path = Path(slide["path"])
+            replacement = None
+            if edit := plan.get("edits", {}).get(case_id):
+                if path not in sources:
+                    sources[path] = _Source(stack.enter_context(ZipFile(path)))
+                source = sources[path]
+                if slide["slide_id"] not in source.slides:
+                    raise CaseExportError("EXPORT_SLIDE_MISSING")
+                replacement = replace_body(source.zip.read(source.slides[slide["slide_id"]]), edit)
+                save_derived_page(path.parent.parent / "selected_edits" / "pages", replacement)
+            cases.append(SlideReference(path, slide["slide_id"], replacement))
     base = [SlideReference(template_path,slide_id) for slide_id in template["slide_ids"]]
     split = plan["insert_after"]
     return export_slides([*base[:split],*cases,*base[split:]],output_path)

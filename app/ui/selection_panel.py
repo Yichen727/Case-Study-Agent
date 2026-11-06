@@ -42,7 +42,7 @@ def render_selected_cases(db_path, manager, owner):
     edited = set(ids) & set(workspace.applied)
     for case_id in edited:
         names[case_id] += "\nEdited version"
-    render_export_panel(db_path,manager,owner,cases,text_edits_applied=bool(edited))
+    render_export_panel(db_path,manager,owner,cases,applied=workspace.applied)
     if not ids:
         st.info("Choose cases using the checkboxes in Search results.")
         return

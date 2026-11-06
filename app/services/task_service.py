@@ -93,9 +93,7 @@ class TaskManager:
 
     def submit_export(self, case_ids, owner="local"):
         case_ids = tuple(case_ids)
-        if set(case_ids) & set(self.selection_edits.load(owner).applied):
-            raise CaseExportError("EXPORT_EDITED_UNAVAILABLE")
-        plan = prepare_export(self.db_path,tuple(case_ids))
+        plan = prepare_export(self.db_path,case_ids,self.selection_edits.load(owner).applied)
         with self._lock:
             with connect(self.db_path) as conn:
                 candidates = conn.execute("""SELECT * FROM tasks WHERE owner=? AND kind='EXPORT' AND cache_key=?
@@ -327,9 +325,13 @@ class TaskManager:
             elif task["kind"] == "INDEX":
                 summary = {"index":self._build_index(progress=progress)}
             elif task["kind"] == "EXPORT":
+                from time import perf_counter
+                started = perf_counter()
                 output = self.db_path.parent / "exports" / f"{payload['cache_key']}.pptx"
                 export_original_slides(payload,output,progress=progress)
-                summary = {"output_path":str(output),"slide_count":payload["slide_count"],"cache_key":payload["cache_key"]}
+                summary = {"output_path":str(output),"slide_count":payload["slide_count"],"cache_key":payload["cache_key"],
+                           "edited_count":len(payload.get("edits", {})), "elapsed_seconds":round(perf_counter()-started,3),
+                           "model_requests":0,"input_tokens":0,"output_tokens":0}
             elif task["kind"] == "CASE_GENERATE":
                 base = Draft.model_validate(payload["base"])
                 current = self.drafts.load(base.draft_id)

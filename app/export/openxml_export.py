@@ -22,6 +22,7 @@ CT = "http://schemas.openxmlformats.org/package/2006/content-types"
 class SlideReference:
     source_path: Path
     original_slide_id: int
+    slide_xml: bytes | None = None
 
 
 class OriginalSlideExportError(ValueError):
@@ -79,10 +80,11 @@ class _Source:
 
 
 class _PartCopier:
-    def __init__(self, output, sources, selected):
+    def __init__(self, output, sources, selected, overrides=None):
         self.output = output
         self.sources = sources
         self.selected = selected
+        self.overrides = overrides or {}
         self.mapping = {}
         self.types = {}
         self.used_master_layout_ids = set()
@@ -109,7 +111,9 @@ class _PartCopier:
             counter += 1
         self.mapping[key] = destination  # Register before following cyclic master/layout/notes links.
         self.types[destination] = source.content_type(part)
-        if self.types[destination].endswith(".slideMaster+xml"):
+        if key in self.overrides:
+            self.output.writestr(destination, self.overrides[key])
+        elif self.types[destination].endswith(".slideMaster+xml"):
             master = _xml(source.zip.read(part))
             for node in master.findall(f"{{{P}}}sldLayoutIdLst/{{{P}}}sldLayoutId"):
                 identifier = int(node.get("id"))
@@ -214,15 +218,18 @@ def export_slides(slides: list[SlideReference], output_path: str | Path) -> Path
             first = sources[source_paths[0]]
             if any(source.size != first.size for source in sources.values()):
                 raise OriginalSlideExportError("Presentations have different slide sizes; automatic scaling is not supported.","EXPORT_SIZE_MISMATCH")
-            selected = []
+            selected, overrides = [], {}
             for ref in slides:
                 path = Path(ref.source_path).resolve()
                 if ref.original_slide_id not in sources[path].slides:
                     raise OriginalSlideExportError("The original slide is missing from its source snapshot.","EXPORT_SLIDE_MISSING")
-                selected.append((path, sources[path].slides[ref.original_slide_id]))
+                key = (path, sources[path].slides[ref.original_slide_id])
+                selected.append(key)
+                if ref.slide_xml is not None:
+                    overrides[key] = ref.slide_xml
             temporary = stack.enter_context(NamedTemporaryFile(dir=output_path.parent, suffix=".pptx", delete=False))
             with ZipFile(temporary, "w", compression=ZIP_DEFLATED) as output:
-                copier = _PartCopier(output, sources, set(selected))
+                copier = _PartCopier(output, sources, set(selected), overrides)
                 presentation = deepcopy(first.presentation)
                 main_rels = ET.Element(f"{{{REL}}}Relationships", nsmap={None: REL})
 
