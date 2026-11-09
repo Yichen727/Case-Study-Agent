@@ -6,12 +6,7 @@ from functools import lru_cache
 
 from app.models import missing_value, REQUIRED_CASE_FIELDS
 
-CLASSIFIER_VERSION = "match-evidence-v3-deliverables"
-# These words describe production in general. They can satisfy an explicitly
-# requested service, but cannot alone establish relevance to a specific topic.
-GENERAL_PRODUCTION_WORDS = frozenset("asset assets toolkit toolkits create created creating creation design designed designing "
-    "develop developed development content work project projects produce produced production creative "
-    "campaign campaigns brand brands service services deck presentation".split())
+CLASSIFIER_VERSION = "match-evidence-v4-logic"
 
 
 @lru_cache(maxsize=8192)
@@ -113,7 +108,19 @@ def check_requirement(case, metadata, requirement):
     kind,terms = requirement.kind,requirement.terms
     raw = case["original_text"]
     status,quote,source = "UNKNOWN",None,"Original slide"
-    if kind in {"client","pillar","services"}:
+    if kind == "services":
+        quote = quote_for(raw,terms)
+        if quote:
+            status = "MET"
+        elif quote_for(raw,terms,negated=True):
+            status,quote = "NOT_MET",quote_for(raw,terms,negated=True)
+        elif trusted(metadata.get(kind)):
+            quote = quote_for(case.get(kind),terms)
+            if quote:
+                status,source = "MET","Verified or extracted services"
+        # A short services list is not an exhaustive declaration of everything
+        # the team did. An omitted service is UNKNOWN, not a contradiction.
+    elif kind in {"client","pillar"}:
         value = case.get(kind)
         if not missing_value(value) and trusted(metadata.get(kind)):
             status = "MET" if any(contains(value,term) for term in terms) else "NOT_MET"
@@ -173,8 +180,27 @@ def check_requirement(case, metadata, requirement):
     return {"requirement":requirement.description,"status":status,"quote":quote,"source":source}
 
 
+def mandatory_checks(case, metadata, intent):
+    if intent is None:
+        return []
+    atomic = [check_requirement(case,metadata,req) for req in intent.mandatory]
+    groups = intent.mandatory_groups or [[i] for i in range(len(atomic))]
+    checks = []
+    for group in groups:
+        alternatives = [atomic[i] for i in group]
+        # Three-valued OR: one supported alternative suffices; only all proven
+        # contradictions fail. Missing evidence remains UNKNOWN.
+        chosen = min(alternatives,key=lambda check:{"MET":0,"UNKNOWN":1,"NOT_MET":2}[check["status"]])
+        check = dict(chosen)
+        if len(group)>1:
+            check["requirement"] = "Any of: " + "; ".join(item["requirement"] for item in alternatives)
+            check["alternatives"] = alternatives
+        checks.append(check)
+    return checks
+
+
 def classify(case, metadata, intent, semantic, lexical_coverage, keyword_terms):
-    mandatory = [check_requirement(case,metadata,req) for req in intent.mandatory] if intent else []
+    mandatory = mandatory_checks(case,metadata,intent)
     preferred = [check_requirement(case,metadata,req) for req in intent.preferred] if intent else []
     excluded = []
     for req in intent.excluded if intent else []:
@@ -204,27 +230,15 @@ def classify(case, metadata, intent, semantic, lexical_coverage, keyword_terms):
         level = "High Match"
         reason = "The original evidence supports the requested theme and mandatory conditions."
     if level == "Partial Match":
-        topic_checks, topic_terms = [], []
-        for requirement, check in zip(intent.mandatory if intent else [], mandatory):
-            specific_terms = [term for term in requirement.terms if words(term) - GENERAL_PRODUCTION_WORDS]
-            if requirement.kind in {"ai_production", "interactive", "no_additional_filming"} or (
-                    requirement.kind in {"content", "client", "services", "pillar", "source"} and specific_terms):
-                topic_checks.append(check)
-                topic_terms.extend(specific_terms)
-        if not topic_checks:
-            topic_terms = [term for term in keyword_terms if words(term) - GENERAL_PRODUCTION_WORDS]
-        topic_supported = any(check["status"] == "MET" for check in topic_checks) or bool(quote_for(case["original_text"], topic_terms))
-        if not topic_supported:
-            topic_supported = any(trusted(row) and quote_for(row.get("value"), topic_terms)
-                                  for name, row in metadata.items() if name in REQUIRED_CASE_FIELDS)
-        # Keep strongly semantic alternatives and genuine evidence-gap examples.
-        # Weak similarity/common production terms must not fill Partial Match.
-        unsupported_topic = (topic_checks or topic_terms) and not topic_supported and not (semantic is not None and semantic >= 0.52)
-        # A request made entirely of production outputs still needs evidence for
-        # at least one output; common words such as "design" are insufficient.
-        unsupported_outputs = bool(mandatory) and not (topic_checks or topic_terms) and not any(
-            check["status"] == "MET" for check in mandatory)
-        if unsupported_topic or unsupported_outputs:
+        groups = (intent.mandatory_groups or [[i] for i in range(len(mandatory))]) if intent else []
+        context_checks = [check for group,check in zip(groups,mandatory) if any(
+            intent.mandatory[i].role == "context" or intent.mandatory[i].kind in {"client","pillar","source"}
+            for i in group)]
+        # Context comes from the interpreted request, not a vocabulary of output
+        # names. Animation, websites and new deliverables share the same logic.
+        supported = any(check["status"] == "MET" for check in (context_checks or mandatory))
+        semantic_alternative = bool(context_checks) and semantic is not None and semantic>=0.52
+        if mandatory and not supported and not semantic_alternative:
             level, reason = "Not a Match", "Insufficient evidence of relevance to the requested topic."
     evidence = [{"source":item["source"],"quote":item["quote"]} for item in [*mandatory,*preferred,*excluded] if item["quote"]]
     if topic_quote:

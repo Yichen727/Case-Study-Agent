@@ -7,13 +7,13 @@ from typing import Literal
 
 import httpx
 from openai import OpenAI, APIError
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app import config
 from app.db.repository import connect
 from app.search.embedding_service import SearchServiceError
 
-PARSER_VERSION = "search-intent-v5-en"
+PARSER_VERSION = "search-intent-v6-logic"
 MAX_QUERY_BYTES = 6000
 
 
@@ -25,6 +25,7 @@ class Requirement(BaseModel):
     terms: list[str] = Field(max_length=8)
     minimum: float | None
     request_quote: str = Field(default="",max_length=500,description="Full verbatim sentence from the user's request that states this condition, including partial/related-example qualifiers.")
+    role: Literal["context","capability"] = Field(default="capability",description="context: required industry, subject, client, audience or source. capability: requested service, deliverable, format, production method or outcome. This controls relevance of partial examples, not whether the condition is mandatory. Do not treat a requested deliverable as an industry/topic filter.")
 
 
 class SearchIntent(BaseModel):
@@ -35,6 +36,21 @@ class SearchIntent(BaseModel):
     preferred: list[Requirement] = Field(max_length=6)
     excluded: list[Requirement] = Field(max_length=4)
     unresolved_mandatory: list[str] = Field(max_length=16,description="Only explicit hard requirements that cannot be represented; never commentary or presentation instructions.")
+    mandatory_groups: list[list[int]] = Field(default_factory=list,max_length=8,description="Explicit Boolean logic: AND between groups, OR within each group. Each number is a zero-based index into mandatory. Include EVERY mandatory condition. A AND B: [[0],[1]]. A OR B: [[0,1]]. Context C AND (A OR B): [[0],[1,2]]. Alternatives may have different kinds. Preserve the user's AND/OR scope, not merely the wording of the summary. Empty only when mandatory is empty. Split distinct alternatives into atomic conditions when grouping them.")
+
+    @model_validator(mode="after")
+    def check_groups(self):
+        if self.mandatory and not self.mandatory_groups:
+            raise ValueError("Mandatory conditions require explicit logical groups")
+        if self.mandatory_groups:
+            indices = []
+            for group in self.mandatory_groups:
+                if not group or len(group)>8 or len(group)!=len(set(group)):
+                    raise ValueError("Invalid mandatory group")
+                indices.extend(group)
+            if set(indices)!=set(range(len(self.mandatory))):
+                raise ValueError("Mandatory groups must cover every condition using valid indices")
+        return self
 
 
 INSTRUCTIONS = """Interpret this case-study search request; do not answer it or invent case studies.
@@ -141,9 +157,11 @@ def interpret_query(db_path, query):
         if any(len(term)>100 or not term.strip() for req in [*intent.mandatory,*intent.preferred,*intent.excluded] for term in req.terms):
             raise SearchServiceError("INVALID_RESPONSE")
         normalized_query = " ".join(query.split()).casefold()
+        groups = intent.mandatory_groups or [[i] for i in range(len(intent.mandatory))]
+        retained_indices = []
         for group in ("mandatory","preferred","excluded"):
             kept = []
-            for requirement in getattr(intent,group):
+            for index, requirement in enumerate(getattr(intent,group)):
                 anchor = normalize_query(requirement.request_quote)
                 if not anchor or anchor not in normalized_query:
                     if group != "preferred":
@@ -158,7 +176,12 @@ def interpret_query(db_path, query):
                     intent.unresolved_mandatory.append(requirement.description)
                     continue
                 kept.append(requirement)
+                if group == "mandatory":
+                    retained_indices.append(index)
             setattr(intent,group,kept)
+        remap = {old:new for new,old in enumerate(retained_indices)}
+        intent.mandatory_groups = [[remap[index] for index in group if index in remap]
+                                   for group in groups if any(index in remap for index in group)]
     except APIError:
         raise SearchServiceError("UNAVAILABLE") from None
     except (ValueError,ValidationError):
