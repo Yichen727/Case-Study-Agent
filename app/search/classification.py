@@ -6,6 +6,13 @@ from functools import lru_cache
 
 from app.models import missing_value, REQUIRED_CASE_FIELDS
 
+CLASSIFIER_VERSION = "match-evidence-v2-topic"
+# These words describe production in general. They can satisfy an explicitly
+# requested service, but cannot alone establish relevance to a specific topic.
+GENERAL_PRODUCTION_WORDS = frozenset("asset assets create created creating creation design designed designing "
+    "develop developed development content work project projects produce produced production creative "
+    "campaign campaigns brand brands service services deck presentation".split())
+
 
 @lru_cache(maxsize=8192)
 def normal(text):
@@ -194,6 +201,24 @@ def classify(case, metadata, intent, semantic, lexical_coverage, keyword_terms):
     else:
         level = "High Match"
         reason = "The original evidence supports the requested theme and mandatory conditions."
+    if level == "Partial Match":
+        topic_checks, topic_terms = [], []
+        for requirement, check in zip(intent.mandatory if intent else [], mandatory):
+            specific_terms = [term for term in requirement.terms if words(term) - GENERAL_PRODUCTION_WORDS]
+            if requirement.kind in {"ai_production", "interactive", "no_additional_filming"} or (
+                    requirement.kind in {"content", "client", "services", "pillar", "source"} and specific_terms):
+                topic_checks.append(check)
+                topic_terms.extend(specific_terms)
+        if not topic_checks:
+            topic_terms = [term for term in keyword_terms if words(term) - GENERAL_PRODUCTION_WORDS]
+        topic_supported = any(check["status"] == "MET" for check in topic_checks) or bool(quote_for(case["original_text"], topic_terms))
+        if not topic_supported:
+            topic_supported = any(trusted(row) and quote_for(row.get("value"), topic_terms)
+                                  for name, row in metadata.items() if name in REQUIRED_CASE_FIELDS)
+        # Keep strongly semantic alternatives and genuine evidence-gap examples.
+        # Weak similarity/common production terms must not fill Partial Match.
+        if (topic_checks or topic_terms) and not topic_supported and not (semantic is not None and semantic >= 0.52):
+            level, reason = "Not a Match", "Insufficient evidence of relevance to the requested topic."
     evidence = [{"source":item["source"],"quote":item["quote"]} for item in [*mandatory,*preferred,*excluded] if item["quote"]]
     if topic_quote:
         evidence.append({"source":"Original slide","quote":topic_quote})
