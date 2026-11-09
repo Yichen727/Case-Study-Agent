@@ -15,5 +15,7 @@ data/generated_cases/
 data/selected_edits/
 evaluation/
 tests/
+docs/
+copilot-skills/
 PLAN.md
 .DS_Store

@@ -34,7 +34,7 @@ from app.export.slide_export import export_error_message
 from app.ui.create_case_panel import render_create_case, case_error_message
 from app.services.selection_editing import ERROR_MESSAGES as EDIT_ERRORS, SelectionEditError
 
-PAGE_SIZE = 25
+PAGE_SIZE = 30
 st.set_page_config(page_title="Case Study Agent", layout="wide")
 
 initialized = init_db(DB_PATH)
