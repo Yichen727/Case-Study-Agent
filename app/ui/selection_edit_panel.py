@@ -58,7 +58,7 @@ def _render(manager, owner, workspace):
         disabled=bool(active), placeholder="Example: For all selected cases, remove the section headings and condense each body into two paragraphs at about half its current length.",
         on_change=_remember, args=("selection-edit-prompt", "_selection_edit_prompt"))
     unresolved = bool(pending and not pending.result.question)
-    if st.button("Send Request", key="selection-edit-send",
+    if st.button("Send request", key="selection-edit-send",
                  disabled=not ids or bool(active) or unresolved or not get_ai_settings().api_key):
         if not prompt.strip():
             st.warning("Describe the text changes before sending.")
