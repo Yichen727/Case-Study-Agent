@@ -2,6 +2,8 @@
 import hashlib
 import re
 
+from app.slide_text import case_text
+
 INDEX_VERSION = "case-search-v1"
 EMBEDDING_DIMENSIONS = 768
 MAX_INPUT_BYTES = 6000  # Conservative bound below the model's 8192-token limit.
@@ -17,11 +19,11 @@ def text_hash(text):
 
 def make_document(case, original):
     fields = ("title","pillar","client","services","brief","creative","impact")
-    parts = [f"{name.title()}: {case[name]}" for name in fields if case.get(name)]
+    parts = [f"{name.title()}: {case_text(case[name])}" for name in fields if case_text(case.get(name)).strip()]
     # Nonstandard slides still need their full original narrative in the index.
     if not all(case.get(name) for name in ("brief","creative","impact")):
-        lines = [line for line in original.splitlines() if not line.strip().isdigit()
-                 and not line.upper().startswith(("REPLACE WITH", "READ MORE", "WATCH VIDEO"))]
+        lines = [line for line in case_text(original).splitlines() if not line.strip().isdigit()
+                 and not line.strip().upper().startswith(("READ MORE", "WATCH VIDEO"))]
         parts.append("Original slide: " + "\n".join(lines))
     return bounded_text(re.sub(r"\s+"," ","\n".join(parts)).strip())
 
@@ -38,7 +40,7 @@ def sync_documents(conn, case_ids=None):
     changed = 0
     for row in conn.execute(sql,params).fetchall():
         case = dict(row)
-        original = case["original_text"] or ""
+        original = case_text(case["original_text"])
         document = make_document(case,original)
         fingerprint = text_hash(document)
         previous = conn.execute("SELECT content_hash,original_text FROM search_documents WHERE case_id=?",(case["case_id"],)).fetchone()
@@ -50,6 +52,6 @@ def sync_documents(conn, case_ids=None):
                      (case["case_id"],fingerprint,document,original))
         conn.execute("DELETE FROM cases_fts WHERE case_id=?",(case["case_id"],))
         conn.execute("INSERT INTO cases_fts(case_id,title,pillar,client,services,body) VALUES (?,?,?,?,?,?)",
-                     (case["case_id"],case["title"],case["pillar"],case["client"],case["services"],document))
+                     (case["case_id"],*(case_text(case.get(name)) for name in ("title","pillar","client","services")),document))
         changed += 1
     return changed

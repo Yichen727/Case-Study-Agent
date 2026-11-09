@@ -5,8 +5,9 @@ import unicodedata
 from functools import lru_cache
 
 from app.models import missing_value, REQUIRED_CASE_FIELDS
+from app.slide_text import case_text
 
-CLASSIFIER_VERSION = "match-evidence-v4-logic"
+CLASSIFIER_VERSION = "match-evidence-v5-clean-evidence"
 
 
 @lru_cache(maxsize=8192)
@@ -29,12 +30,12 @@ def evidence_pattern(term):
 
 def contains(text, term):
     term = normal(term)
-    return bool(term and term_pattern(term).search(normal(text)))
+    return bool(term and term_pattern(term).search(normal(case_text(text))))
 
 
 @lru_cache(maxsize=2048)
 def sentences(text):
-    return tuple(part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+",text or "") if part.strip())
+    return tuple(part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+",case_text(text)) if part.strip())
 
 
 @lru_cache(maxsize=2048)
@@ -121,7 +122,7 @@ def check_requirement(case, metadata, requirement):
         # A short services list is not an exhaustive declaration of everything
         # the team did. An omitted service is UNKNOWN, not a contradiction.
     elif kind in {"client","pillar"}:
-        value = case.get(kind)
+        value = case_text(case.get(kind))
         if not missing_value(value) and trusted(metadata.get(kind)):
             status = "MET" if any(contains(value,term) for term in terms) else "NOT_MET"
             quote,source = value,"Verified or extracted " + kind
