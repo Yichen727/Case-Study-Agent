@@ -17,7 +17,11 @@ _leases: dict[str, int] = {}
 
 
 def find_local_import(db_path, source):
-    """Reuse identical local uploads without merging independent legacy sources."""
+    """Find shared-library content, independent of uploader and incoming filename.
+
+    Task ownership is deliberately not part of a presentation's identity.
+    Keep existing independent legacy sources intact rather than merging their cases.
+    """
     if source.source_type != "LOCAL":
         return None
     with connect(db_path) as conn:

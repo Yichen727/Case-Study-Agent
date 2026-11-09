@@ -13,7 +13,8 @@ from app.services.enrichment_service import enrich_source
 from app.services.ai_enrichment import infer_missing_metadata
 
 
-# The demo has one worker. Also keep direct concurrent imports idempotent until commit.
+# One shared worker/library for all uploaders. Protect direct concurrent imports
+# through the duplicate lookup and commit so two users cannot both insert a deck.
 _import_lock = RLock()
 
 

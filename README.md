@@ -68,6 +68,8 @@ To prepare an internal ZIP with the approved shared `.env`, run `python package_
 
 Each recognised case-study slide becomes a separate case, including slides with the same name. Uploading an identical deck again does not add duplicate cases or overwrite manual corrections. View the library in **All cases**.
 
+Deduplication applies across employees using the same shared app library. The exact same file bytes reuse the existing source and case IDs even if another person uploads the file under a different filename. Parsing and web / AI metadata enrichment are skipped for that repeated import. A changed file is a new version, even when its filename is unchanged; matching case names alone do not merge slides. This reuse requires the shared library and source snapshots to still be available.
+
 ## 2. Search and select
 
 Describe your brief in **Search cases**, including must-haves or exclusions, then click **Search**. Enter adds a new line.
