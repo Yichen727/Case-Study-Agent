@@ -6,10 +6,10 @@ from functools import lru_cache
 
 from app.models import missing_value, REQUIRED_CASE_FIELDS
 
-CLASSIFIER_VERSION = "match-evidence-v2-topic"
+CLASSIFIER_VERSION = "match-evidence-v3-deliverables"
 # These words describe production in general. They can satisfy an explicitly
 # requested service, but cannot alone establish relevance to a specific topic.
-GENERAL_PRODUCTION_WORDS = frozenset("asset assets create created creating creation design designed designing "
+GENERAL_PRODUCTION_WORDS = frozenset("asset assets toolkit toolkits create created creating creation design designed designing "
     "develop developed development content work project projects produce produced production creative "
     "campaign campaigns brand brands service services deck presentation".split())
 
@@ -191,7 +191,9 @@ def classify(case, metadata, intent, semantic, lexical_coverage, keyword_terms):
     # similarity score. Unknown/excluded conditions still block High Match below.
     evidenced = bool(mandatory) and all(item["status"] == "MET" for item in mandatory)
     strong = evidenced or (semantic is not None and semantic>=0.52) or lexical_coverage>=0.60
-    related = evidenced or (semantic is not None and semantic>=0.40) or lexical_coverage>=0.10
+    # One evidenced AND branch is a related example even with low similarity.
+    # Topic checks below still prevent generic assets from proving an industry.
+    related = any(item["status"] == "MET" for item in mandatory) or (semantic is not None and semantic>=0.40) or lexical_coverage>=0.10
     if failures or not related:
         level = "Not a Match"
         reason = "Conflicts with: " + "; ".join(item["requirement"] for item in failures) if failures else "Insufficient relevance to the requested theme."
@@ -217,7 +219,12 @@ def classify(case, metadata, intent, semantic, lexical_coverage, keyword_terms):
                                   for name, row in metadata.items() if name in REQUIRED_CASE_FIELDS)
         # Keep strongly semantic alternatives and genuine evidence-gap examples.
         # Weak similarity/common production terms must not fill Partial Match.
-        if (topic_checks or topic_terms) and not topic_supported and not (semantic is not None and semantic >= 0.52):
+        unsupported_topic = (topic_checks or topic_terms) and not topic_supported and not (semantic is not None and semantic >= 0.52)
+        # A request made entirely of production outputs still needs evidence for
+        # at least one output; common words such as "design" are insufficient.
+        unsupported_outputs = bool(mandatory) and not (topic_checks or topic_terms) and not any(
+            check["status"] == "MET" for check in mandatory)
+        if unsupported_topic or unsupported_outputs:
             level, reason = "Not a Match", "Insufficient evidence of relevance to the requested topic."
     evidence = [{"source":item["source"],"quote":item["quote"]} for item in [*mandatory,*preferred,*excluded] if item["quote"]]
     if topic_quote:
