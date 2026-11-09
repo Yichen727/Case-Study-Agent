@@ -43,7 +43,7 @@ def _render(manager, owner, workspace):
     st.subheader("Edit selected text")
     if error := st.session_state.pop("_selection_edit_action_error", None):
         st.error(error)
-    st.caption("Describe the body-text changes. Use selection numbers such as case 2 or cases 1 and 3, or say all selected cases. Titles and media stay unchanged.")
+    st.caption("Describe the body-text changes. Use selection numbers such as case 2 or cases 1 and 3, or say all selected cases.")
     if pending and st.session_state.get("_selection_edit_seen") != pending.plan.request_id:
         st.session_state["_selection_edit_seen"] = pending.plan.request_id
         st.session_state["_selection_edit_prompt"] = ""
@@ -55,10 +55,10 @@ def _render(manager, owner, workspace):
         with st.chat_message("assistant"):
             st.write(pending.result.question)
     prompt = st.text_area("Editing request", key="selection-edit-prompt", height=110, max_chars=4000,
-        disabled=bool(active), placeholder="For all selected cases, remove the section headings and condense each body into two paragraphs at about half its current length.",
+        disabled=bool(active), placeholder="Example: For all selected cases, remove the section headings and condense each body into two paragraphs at about half its current length.",
         on_change=_remember, args=("selection-edit-prompt", "_selection_edit_prompt"))
     unresolved = bool(pending and not pending.result.question)
-    if st.button("Send request", key="selection-edit-send",
+    if st.button("Send Request", key="selection-edit-send",
                  disabled=not ids or bool(active) or unresolved or not get_ai_settings().api_key):
         if not prompt.strip():
             st.warning("Describe the text changes before sending.")

@@ -50,7 +50,7 @@ def render_export_panel(db_path, manager, owner, cases, *, applied=None):
                            key=f"selected-download-{previous_id or 'none'}",
                            file_name=f"case-studies-{result['slide_count']}-slides.pptx" if path else "case-studies.pptx",
                            disabled=path is None,on_click="ignore")
-    st.caption("Your ordered cases are inserted between pages 4 and 5 of the company template.")
+    st.caption("Your ordered cases are inserted into the company template.")
     if any(case_id in applied for case_id in snapshot):
         st.caption("Applied text replaces only the original body area. Check the edited slides in PowerPoint before sharing.")
     if any(case["review_status"]=="NEEDS_REVIEW" or case["unverified_ai"] for case in cases):

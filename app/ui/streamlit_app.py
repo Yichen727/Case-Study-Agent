@@ -145,7 +145,7 @@ if notice := st.session_state.pop("notice", None):
     st.success(notice)
 
 with st.sidebar:
-    st.header("1. Import presentations")
+    st.header("1. Import Presentations")
     uploaded = st.file_uploader(
         "Upload approved PowerPoint decks", type=["pptx"], accept_multiple_files=True,
         key=f"uploads:{st.session_state.get('uploader_version', 0)}",
@@ -252,10 +252,10 @@ with st.sidebar:
 
     show_tasks()
     st.divider()
-    st.header("2. Search")
+    st.header("2. Search Cases")
     with st.form("case_search", enter_to_submit=False):
         query = st.text_area("Search cases", placeholder="Describe your brief, must-haves, preferences and anything to exclude",
-                             height=200,max_chars=4000)
+                             height=200,max_chars=1000,label_visibility="collapsed")
         search_clicked = st.form_submit_button("Search", width="stretch")
     if search_clicked:
         st.session_state["search_request"] = {"query": query, "limit": 100}
@@ -308,16 +308,6 @@ def render_search_results():
     high_matches = [item for item in results if item.get("match_level")=="High Match"]
     partial_matches = [item for item in results if item.get("match_level")=="Partial Match"]
     chosen = selected_ids(st.session_state)
-    select_high, clear_all, selected_nav = st.columns(3)
-    with select_high:
-        st.button("Select all High Match",disabled=not high_matches,
-                  on_click=select_cases,args=(st.session_state,[item["case_id"] for item in high_matches]))
-    with clear_all:
-        st.button("Clear all selections",disabled=not chosen,on_click=clear_selection,args=(st.session_state,))
-    with selected_nav:
-        if st.button(f"Selected cases ({len(chosen)})",key="selected-cases-nav",
-                     disabled=not chosen,on_click=focus_selection_tab):
-            st.rerun()
     if not request:
         st.info("Upload a presentation, then enter a query and click Search.")
     elif not results:
@@ -327,6 +317,17 @@ def render_search_results():
             st.info(notice)
         if intent := getattr(results,"intent",None):
             st.write("**Your brief:** " + intent["summary"])
+    with st.container(horizontal=True,vertical_alignment="center",gap="small"):
+        st.button("Select all High Match",disabled=not high_matches,icon=":material/playlist_add:",
+                  on_click=select_cases,args=(st.session_state,[item["case_id"] for item in high_matches]))
+        st.button("Clear all selections",disabled=not chosen,type="tertiary",
+                  on_click=clear_selection,args=(st.session_state,))
+        st.space("stretch")
+        if st.button(f"Selected cases ({len(chosen)})",key="selected-cases-nav",type="primary",
+                     icon=":material/arrow_forward:",icon_position="right",
+                     disabled=not chosen,on_click=focus_selection_tab):
+            st.rerun()
+    if request:
         if high_matches:
             with st.expander(f"High Match ({len(high_matches)})",expanded=True):
                 offset = page_offset("match_page",len(high_matches),10,"High Match page") if len(high_matches)>10 else 0
@@ -359,7 +360,6 @@ if tab_create.open:
 if tab_all.open:
     with tab_all:
         total = count_cases(DB_PATH)
-        st.write(f"Stored cases: {total}")
         if total:
             cases = list_cases(DB_PATH, PAGE_SIZE, page_offset("all_page", total))
             if any(case["requires_reimport"] for case in cases):

@@ -179,7 +179,7 @@ def _render_images(manager, draft):
                 else:
                     st.session_state["_case_pending_images"] = [value for number, value in enumerate(pending) if number != index]
                 st.rerun()
-    st.caption("Images fill positions 1–4 in this order, centred and cropped to fit. Empty positions stay blank.")
+    st.caption("Images fill positions 1–4 in this order. Empty positions stay blank.")
 
 
 def _render_history(manager, owner, current):
@@ -234,7 +234,6 @@ def _render(manager, owner):
             manager.drafts.start_new()
             _clear_case_buffers()
             st.rerun()
-    st.caption("Draft an English case from your project notes. Missing facts stay blank; add up to four images if needed.")
     if notice := st.session_state.pop("_case_notice", None):
         st.success(notice)
     settings = get_ai_settings()
@@ -285,8 +284,7 @@ def _render(manager, owner):
     if visible_draft.clarification_question:
         with st.chat_message("assistant"):
             st.write(visible_draft.clarification_question)
-    else:
-        st.caption("Add details or wording refinements whenever you need them.")
+
     reply_key = f"create_reply:{draft.draft_id}"
     reply_round = (draft.draft_id, draft.request_count)
     if st.session_state.get("_create_reply_round", reply_round) != reply_round:
@@ -319,8 +317,6 @@ def _render(manager, owner):
 
     st.text_input("Title", key=f"create:{draft.draft_id}:title", max_chars=160, on_change=_capture_edit,
                   args=("title", f"create:{draft.draft_id}:title"))
-    if content.title:
-        st.caption(f"Slide title: {content.export_title}")
     client, services, pillar = st.columns([1, 2, 1])
     for container, name in ((client, "client"), (services, "services"), (pillar, "pillar")):
         with container:
@@ -332,7 +328,6 @@ def _render(manager, owner):
                      on_change=_capture_edit, args=(name, f"create:{draft.draft_id}:{name}"))
     if editor["dirty"]:
         st.caption("Unsaved edits. Save draft or Generate PPTX to keep them.")
-    st.caption("Client and Services are saved with the draft only.")
     if content.body_words > 250:
         st.warning("The text is too long for this slide. Please shorten it before exporting.")
     if len(content.export_title) > 40:
@@ -344,7 +339,7 @@ def _render(manager, owner):
         _save_editor(manager, draft, editor)
         st.session_state["_case_notice"] = "Draft saved."
         st.rerun()
-    if retry.button("Retry", key="create-retry", disabled=busy or bool(exporting) or not settings.api_key,
+    if retry.button("Regenerate Text", key="create-retry", disabled=busy or bool(exporting) or not settings.api_key,
                     help="Regenerate AI-written text. Manual edits and images are kept."):
         _save_editor(manager, draft, editor)
         manager.submit_case_generation(draft.draft_id, owner=owner, retry=True)
@@ -363,8 +358,6 @@ def _render(manager, owner):
         st.success("Your single-slide PPTX is ready.")
     elif stale:
         st.info("Your draft or template has changed. Generate a new PPTX before downloading.")
-    st.caption("Check the wording before generating. Drafts are saved locally and restored when you reopen Create case.")
-
 
 def render_create_case(manager, owner):
     try:
