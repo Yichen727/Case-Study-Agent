@@ -12,7 +12,7 @@ from app.db.repository import connect
 from app.export.openxml_export import export_slides, presentation_slide_ids, SlideReference, _Source
 from app.export.edited_body import replace_body, save_derived_page
 
-EXPORT_ENGINE_VERSION = "openxml-v4-edited-body"
+EXPORT_ENGINE_VERSION = "openxml-v6-regular-body-single-notes-master"
 TEMPLATE_INSERT_AFTER = 4
 ERROR_MESSAGES = {
     "EXPORT_EDIT_INVALID":"An applied edit no longer matches its original slide. Restore original and submit a new editing request.",

@@ -87,6 +87,7 @@ class _PartCopier:
         self.overrides = overrides or {}
         self.mapping = {}
         self.types = {}
+        self.notes_master = None
         self.used_master_layout_ids = set()
         self.next_metadata_id = 2147483648
 
@@ -103,6 +104,11 @@ class _PartCopier:
         if key in self.mapping:
             return self.mapping[key]
         source = self.sources[source_path]
+        content_type = source.content_type(part)
+        if content_type.endswith(".notesMaster+xml") and self.notes_master is not None:
+            # All notes slides must use the single presentation-level notes master.
+            self.mapping[key] = self.notes_master
+            return self.notes_master
         destination = part
         stem, extension = posixpath.splitext(part)
         counter = 2
@@ -110,7 +116,9 @@ class _PartCopier:
             destination = f"{stem}_{counter}{extension}"
             counter += 1
         self.mapping[key] = destination  # Register before following cyclic master/layout/notes links.
-        self.types[destination] = source.content_type(part)
+        self.types[destination] = content_type
+        if content_type.endswith(".notesMaster+xml"):
+            self.notes_master = destination
         if key in self.overrides:
             self.output.writestr(destination, self.overrides[key])
         elif self.types[destination].endswith(".slideMaster+xml"):
@@ -269,7 +277,8 @@ def export_slides(slides: list[SlideReference], output_path: str | Path) -> Path
                     if content_type.endswith(".slideMaster+xml"):
                         rid = relationship(R + "/slideMaster", part)
                         ET.SubElement(master_list, f"{{{P}}}sldMasterId", id=str(copier.metadata_id()), **{f"{{{R}}}id": rid})
-                    elif content_type.endswith(".notesMaster+xml"):
+                    elif content_type.endswith(".notesMaster+xml") and not len(notes_list):
+                        # PresentationML permits one presentation-level notes master.
                         rid = relationship(R + "/notesMaster", part)
                         ET.SubElement(notes_list, f"{{{P}}}notesMasterId", **{f"{{{R}}}id": rid})
                 presentation.insert(0, master_list)

@@ -52,12 +52,31 @@ def replace_body(slide_xml, edit):
                 paragraph.remove(node)
         run = deepcopy(run_style)
         run.find("a:t", NS).text = value["text"]
+        if value["role"] == "BODY":
+            # The prototype may carry an accent or theme color. Body text is black.
+            run_properties = run.find("a:rPr", NS)
+            if run_properties is None:
+                run_properties = E.Element(f"{{{NS['a']}}}rPr")
+                run.insert(0, run_properties)
+            run_properties.set("b", "0")
+            for child in list(run_properties):
+                if E.QName(child).localname in {"noFill", "solidFill", "gradFill", "blipFill", "pattFill", "grpFill"}:
+                    run_properties.remove(child)
+            fill = E.Element(f"{{{NS['a']}}}solidFill")
+            E.SubElement(fill, f"{{{NS['a']}}}srgbClr", val="000000")
+            run_properties.insert(1 if run_properties.find("a:ln", NS) is not None else 0, fill)
         end = paragraph.find("a:endParaRPr", NS)
         paragraph.insert(list(paragraph).index(end) if end is not None else len(paragraph), run)
         properties = paragraph.find("a:pPr", NS)
         if properties is None:
             properties = E.Element(f"{{{NS['a']}}}pPr")
             paragraph.insert(0, properties)
+        if value["role"] == "BODY":
+            default_run = properties.find("a:defRPr", NS)
+            if default_run is not None:
+                default_run.set("b", "0")
+            if end is not None:
+                end.set("b", "0")
         # Free paragraphs retain the source font/line height and gain a clear gap.
         for name, points in (("spcBef", 0), ("spcAft", 10 if value["role"] == "BODY" else 2)):
             spacing = properties.find(f"a:{name}", NS)
