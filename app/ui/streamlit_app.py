@@ -65,7 +65,7 @@ manager.ensure_indexing(owner)
 
 
 def focus_metadata_tab():
-    st.session_state["active_tab"] = "Needs Review"
+    st.session_state["active_tab"] = "Needs review"
 
 
 def focus_selection_tab():
@@ -145,6 +145,7 @@ if notice := st.session_state.pop("notice", None):
     st.success(notice)
 
 with st.sidebar:
+    st.caption("ATOMIZED STUDIOS")
     st.header("1. Import Presentations")
     uploaded = st.file_uploader(
         "Upload approved PowerPoint decks", type=["pptx"], accept_multiple_files=True,
@@ -179,7 +180,8 @@ with st.sidebar:
         jobs = manager.list_tasks(owner)
         if jobs:
             st.subheader("Processing")
-        for job in jobs:
+        # Show one status; keep the full task list for polling and completion updates.
+        for job in jobs[:1]:
             st.write(job["filename"])
             if job["status"] in {"QUEUED", "RUNNING"}:
                 st.progress(min(1.0, job["completed"] / max(1, job["total"])),
@@ -233,15 +235,9 @@ with st.sidebar:
                         st.warning(str(exc))
                     except SelectionEditError as exc:
                         st.error(str(exc))
-        if jobs and st.button("Clear finished tasks"):
+        if jobs and st.button("Clear finished tasks", help="Removes finished task records and selected-case export files. Original decks, saved drafts and applied edits are retained."):
             manager.clear_finished(owner)
             st.rerun()
-        if any(job["kind"]=="EXPORT" for job in jobs):
-            st.caption("Clearing finished tasks also removes their generated PPTX files. Original decks are retained.")
-        if any(job["kind"] in {"CASE_GENERATE", "CASE_EXPORT"} for job in jobs):
-            st.caption("New case drafts and their slides are retained when finished tasks are cleared.")
-        if any(job["kind"] == "SELECTION_EDIT" for job in jobs):
-            st.caption("Applied text edits are retained when finished tasks are cleared.")
         active = any(job["status"] in {"QUEUED", "RUNNING"} for job in jobs)
         case_states = tuple((job["task_id"], job["status"]) for job in jobs if job["kind"] in {"CASE_GENERATE", "CASE_EXPORT", "SELECTION_EDIT"})
         previous_case_states = st.session_state.get("_case_task_states")
@@ -254,7 +250,7 @@ with st.sidebar:
     st.divider()
     st.header("2. Search Cases")
     with st.form("case_search", enter_to_submit=False):
-        query = st.text_area("Search cases", placeholder="Describe your brief, must-haves, preferences and anything to exclude",
+        query = st.text_area("Search cases", placeholder="e.g. Find projects where we've designed toolkits and created assets.",
                              height=200,max_chars=1000,label_visibility="collapsed")
         search_clicked = st.form_submit_button("Search", width="stretch")
     if search_clicked:
@@ -264,34 +260,34 @@ with st.sidebar:
         st.session_state.pop("match_page",None)
         st.session_state.pop("partial_match_page",None)
 
-    with st.expander("Local storage"):
-        st.caption("Repeated local decks reuse existing cases. Backups and active tasks are protected.")
-        if st.button("Check unused snapshots"):
-            try:
-                candidates = unused_snapshots(DB_PATH)
-                st.session_state["unused_storage"] = (
-                    len(candidates), sum(path.stat().st_size for path in candidates) / 1024**2
-                )
-            except RuntimeError as exc:
-                st.error(str(exc))
-        if storage := st.session_state.get("unused_storage"):
-            count, mib = storage
-            st.caption(f"{count} unused files · {mib:.1f} MiB")
-            if count and st.button("Remove unused snapshots"):
-                try:
-                    removed = remove_unused_snapshots(DB_PATH)
-                    st.session_state.pop("unused_storage", None)
-                    st.session_state["notice"] = f"Removed {removed} unused snapshot files."
-                    st.rerun()
-                except (RuntimeError, OSError):
-                    st.error("Unused snapshots could not be removed. Please check again and retry.")
+    # with st.expander("Local storage"):
+    #     st.caption("Repeated local decks reuse existing cases. Backups and active tasks are protected.")
+    #     if st.button("Check unused snapshots"):
+    #         try:
+    #             candidates = unused_snapshots(DB_PATH)
+    #             st.session_state["unused_storage"] = (
+    #                 len(candidates), sum(path.stat().st_size for path in candidates) / 1024**2
+    #             )
+    #         except RuntimeError as exc:
+    #             st.error(str(exc))
+    #     if storage := st.session_state.get("unused_storage"):
+    #         count, mib = storage
+    #         st.caption(f"{count} unused files · {mib:.1f} MiB")
+    #         if count and st.button("Remove unused snapshots"):
+    #             try:
+    #                 removed = remove_unused_snapshots(DB_PATH)
+    #                 st.session_state.pop("unused_storage", None)
+    #                 st.session_state["notice"] = f"Removed {removed} unused snapshot files."
+    #                 st.rerun()
+    #             except (RuntimeError, OSError):
+    #                 st.error("Unused snapshots could not be removed. Please check again and retry.")
 
 if st.session_state.get("active_tab") == "Export":
     focus_selection_tab()
 st.session_state["_active_tab"] = st.session_state["active_tab"]
 
 tab_search, tab_all, tab_metadata, tab_selected, tab_create = st.tabs(
-    ["Search results", "All cases", "Needs Review", "Selected cases", "Create case"],
+    ["Search results", "All cases", "Needs review", "Selected cases", "Create case"],
     key="active_tab", on_change="rerun",
 )
 
@@ -351,6 +347,7 @@ if tab_search.open:
 if tab_selected.open:
     with tab_selected:
         render_selected_cases(DB_PATH,manager,owner)
+        st.divider()
         render_selection_edits(manager, owner)
 
 if tab_create.open:
