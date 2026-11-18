@@ -354,7 +354,7 @@ def render_search_results():
         st.button("Select all High Match",disabled=not high_matches,icon=":material/playlist_add:",
                   on_click=select_cases,args=(st.session_state,[item["case_id"] for item in high_matches]))
         st.button("Clear all selections",disabled=not chosen,type="tertiary",
-                  on_click=clear_selection,args=(st.session_state,))
+                  icon=":material/close:", on_click=clear_selection,args=(st.session_state,))
         st.space("stretch")
         if st.button(f"Selected cases ({len(chosen)})",key="selected-cases-nav",type="primary",
                      icon=":material/arrow_forward:",icon_position="right",

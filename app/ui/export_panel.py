@@ -53,8 +53,8 @@ def render_export_panel(db_path, manager, owner, cases, *, applied=None):
     st.caption("Your ordered cases are inserted into the company template.")
     if any(case_id in applied for case_id in snapshot):
         st.caption("Applied text replaces only the original body area. Check the edited slides in PowerPoint before sharing.")
-    if any(case["review_status"]=="NEEDS_REVIEW" or case["unverified_ai"] for case in cases):
-        st.caption("Some selected metadata is incomplete or AI-inferred; the original slides can still be exported.")
+    # if any(case["review_status"]=="NEEDS_REVIEW" or case["unverified_ai"] for case in cases):
+    #     st.caption("Some selected metadata is incomplete or AI-inferred; the original slides can still be exported.")
 
     if previous is None:
         return
@@ -69,7 +69,7 @@ def render_export_panel(db_path, manager, owner, cases, *, applied=None):
             st.info("This download uses the selection fixed when generation started. Your current selection is different.")
         if plan["engine_version"] != EXPORT_ENGINE_VERSION:
             st.info("This file uses an earlier export format. Generate again to use the company template.")
-        st.success(f"Presentation ready: {result['slide_count']} slides.")
+        st.success(f"Your presentation is ready to download.")
         if different_selection:
             with st.expander("Slides in this file"):
                 for index,case in enumerate(plan["cases"],1):
