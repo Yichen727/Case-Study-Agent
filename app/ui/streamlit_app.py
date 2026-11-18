@@ -72,8 +72,8 @@ def focus_selection_tab():
     st.session_state["active_tab"] = "Selected cases"
 
 
-def update_selection(case_id, key):
-    select_case(st.session_state,case_id,st.session_state[key])
+def update_selection(case_id):
+    select_case(st.session_state,case_id,case_id not in selected_ids(st.session_state))
 
 
 def labels(options):
@@ -99,12 +99,13 @@ def page_offset(key, total, page_size=PAGE_SIZE, label="Page"):
 
 def show_case(item):
     with st.container(border=True):
-        st.subheader(item["title"])
         case_id = item["case_id"]
-        key = f"case-select:{case_id}"
-        # Canonical selection survives Streamlit cleaning up off-page widgets.
-        st.session_state[key] = case_id in selected_ids(st.session_state)
-        st.checkbox("Select case",key=key,on_change=update_selection,args=(case_id,key))
+        selected = case_id in selected_ids(st.session_state)
+        with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+            st.subheader(item["title"], width="stretch")
+            st.button("✓" if selected else "+", key=f"case-toggle-{case_id}", width=40,
+                      type="primary" if selected else "secondary", on_click=update_selection, args=(case_id,),
+                      help=f"{'Remove' if selected else 'Select'} case: {item['title']}")
         if item.get("match_level"):
             st.markdown(f"**{item['match_level']}**")
             st.write(item["match_reason"])
@@ -309,6 +310,26 @@ tab_search, tab_all, tab_metadata, tab_selected, tab_create = st.tabs(
 
 @st.fragment
 def render_search_results():
+    st.html("""<style>
+        [class*="st-key-case-toggle-"] button[data-testid^="stBaseButton-"] {
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            border-radius: 10px;
+            font-size: 1.25rem;
+            line-height: 1;
+        }
+        [class*="st-key-case-toggle-"] button[data-testid^="stBaseButton-"] p {
+            font-size: 1.25rem;
+            line-height: 1;
+        }
+        [class*="st-key-case-toggle-"] button[data-testid="stBaseButton-primary"],
+        [class*="st-key-case-toggle-"] button[data-testid="stBaseButton-primary"]:hover {
+            background-color: #FF0069;
+            border-color: #FF0069;
+            color: white;
+        }
+    </style>""")
     request = st.session_state.get("search_request")
     if request and "search_results" not in st.session_state:
         try:

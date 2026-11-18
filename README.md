@@ -80,7 +80,7 @@ For example: *Show me cases about AI-generated content for a hospitality brand.*
 - Expand **Partial Match** to review related cases with evidence gaps.
 - Partial Match requires support for a specific requested topic or sufficiently strong semantic relevance. Generic words such as design, create or assets alone do not establish a match to a particular industry.
 - Open **Matching evidence** to check the reasons and supporting text.
-- Tick **Select case** to add an individual slide.
+- Click **+** beside a case title to select that slide. A pink **✓** means selected; click it again to remove the slide.
 - **Select all High Match** adds all High Match results across the current search's pages, keeping existing choices.
 - **Clear all selections** removes every selection, including choices kept from earlier searches.
 

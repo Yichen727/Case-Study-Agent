@@ -44,7 +44,7 @@ def render_selected_cases(db_path, manager, owner):
         names[case_id] += "\nEdited version"
     render_export_panel(db_path,manager,owner,cases,applied=workspace.applied)
     if not ids:
-        st.info("Choose cases using the checkboxes in Search results.")
+        st.info("Click + beside a case title in Search results to select it.")
         return
     st.caption(f"{len(ids)} cases selected. Drag to reorder; Generate PPTX confirms and exports this order.")
     items = [names[case_id] for case_id in ids]
