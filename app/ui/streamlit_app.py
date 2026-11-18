@@ -147,9 +147,24 @@ if notice := st.session_state.pop("notice", None):
 with st.sidebar:
     st.caption("ATOMIZED STUDIOS")
     st.header("1. Import Presentations")
+    st.html("""<style>
+        [data-testid="stSidebar"] [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"]:has([data-testid="stFileUploaderDropzoneInstructions"]) {
+            flex-direction: row;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem;
+        }
+        [data-testid="stSidebar"] [data-testid="stFileUploaderDropzoneInstructions"] {
+            align-self: center;
+        }
+        [data-testid="stSidebar"] [data-testid="stFileUploaderDropzoneInstructions"] span {
+            font-size: 0.8525rem;
+        }
+    </style>""")
     uploaded = st.file_uploader(
         "Upload approved PowerPoint decks", type=["pptx"], accept_multiple_files=True,
         key=f"uploads:{st.session_state.get('uploader_version', 0)}",
+        label_visibility="collapsed",
     )
     if uploaded and st.button("Parse and save decks", type="primary"):
         submitted = 0
@@ -250,7 +265,8 @@ with st.sidebar:
     st.divider()
     st.header("2. Search Cases")
     with st.form("case_search", enter_to_submit=False):
-        query = st.text_area("Search cases", placeholder="e.g. Find projects where we've designed toolkits and created assets.",
+        query = st.text_area("Search cases", placeholder="What kind of work are you looking for?\n"
+            "e.g. Find projects where we've designed toolkits and created assets.",
                              height=200,max_chars=1000,label_visibility="collapsed")
         search_clicked = st.form_submit_button("Search", width="stretch")
     if search_clicked:
@@ -358,9 +374,10 @@ if tab_all.open:
     with tab_all:
         total = count_cases(DB_PATH)
         if total:
-            cases = list_cases(DB_PATH, PAGE_SIZE, page_offset("all_page", total))
+            # cases = list_cases(DB_PATH, PAGE_SIZE, page_offset("all_page", total))
+            cases = list_cases(DB_PATH)
             if any(case["requires_reimport"] for case in cases):
-                st.info("Some legacy cases on this page need their original decks re-imported.")
+                st.info("Some legacy cases need their original decks re-imported.")
             st.dataframe([{
                 "Title": case["title"], "Source deck": case["source_deck"], "Slides": case["slide_numbers"],
                 "Pillar": case["pillar"], "Client": display_field(case,"client"), "Services": display_field(case,"services"),
@@ -390,20 +407,20 @@ if tab_metadata.open:
                 st.session_state["_metadata_case"] = selected_id
                 selected = get_case(DB_PATH,selected_id)
                 render_review(DB_PATH,selected,focus_metadata_tab)
-                with st.expander("Retry automatic enrichment"):
-                    settings = get_ai_settings()
-                    if not settings.api_key:
-                        st.caption("Set OPENAI_API_KEY in the local .env file to enable AI enrichment.")
-                    if st.button("Retry AI enrichment",disabled=not bool(settings.api_key),
-                                 help="Fill missing Client / Services for this presentation. Existing values are retained."):
-                        try:
-                            manager.submit_ai_enrichment(selected["source_id"],selected["source_deck"],owner)
-                            st.rerun()
-                        except TaskQueueFull as exc:
-                            st.warning(str(exc))
-                    if st.button("Retry web metadata"):
-                        try:
-                            manager.submit_enrichment(selected["source_id"],selected["source_deck"],owner)
-                            st.rerun()
-                        except TaskQueueFull as exc:
-                            st.warning(str(exc))
+                # with st.expander("Retry automatic enrichment"):
+                #     settings = get_ai_settings()
+                #     if not settings.api_key:
+                #         st.caption("Set OPENAI_API_KEY in the local .env file to enable AI enrichment.")
+                #     if st.button("Retry AI enrichment",disabled=not bool(settings.api_key),
+                #                  help="Fill missing Client / Services for this presentation. Existing values are retained."):
+                #         try:
+                #             manager.submit_ai_enrichment(selected["source_id"],selected["source_deck"],owner)
+                #             st.rerun()
+                #         except TaskQueueFull as exc:
+                #             st.warning(str(exc))
+                #     if st.button("Retry web metadata"):
+                #         try:
+                #             manager.submit_enrichment(selected["source_id"],selected["source_deck"],owner)
+                #             st.rerun()
+                #         except TaskQueueFull as exc:
+                #             st.warning(str(exc))

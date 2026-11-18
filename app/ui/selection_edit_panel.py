@@ -55,7 +55,7 @@ def _render(manager, owner, workspace):
         with st.chat_message("assistant"):
             st.write(pending.result.question)
     prompt = st.text_area("Editing request", key="selection-edit-prompt", height=110, max_chars=4000,
-        disabled=bool(active), placeholder="Example: For all selected cases, remove the section headings and condense each body into two paragraphs at about half its current length.",
+        disabled=bool(active), placeholder="e.g. For all selected cases, remove the section headings and condense each body into two paragraphs at about half its current length.",
         on_change=_remember, args=("selection-edit-prompt", "_selection_edit_prompt"))
     unresolved = bool(pending and not pending.result.question)
     if st.button("Send request", key="selection-edit-send",
